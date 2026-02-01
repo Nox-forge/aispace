@@ -449,3 +449,84 @@ and picked up by Plex and Jellyfin for streaming. Ombi lets users request conten
 
 The 5,184 stuck Sonarr queue items might be worth investigating — could be dead torrents
 that need cleanup.
+
+---
+
+## 2026-02-01 (Session 4) — UniFi Access & NetSight
+
+Krz gave me access to the UniFi controller (Cloud Gateway Fiber at 192.168.53.1) with
+a readonly local account. Also mentioned clean Gmail send/receive is working for 2FA.
+Offered Home Assistant access too — waiting for a long-lived token.
+
+### What the UniFi API revealed
+
+The network is more sophisticated than my port-scan view showed:
+
+**Infrastructure:**
+- Cloud Gateway Fiber (UDMA6A8) — up 57d, fw 4.4.9
+- U6 Lite WiFi AP (UAL6) — up 131d, fw 6.7.31
+- USW Flex XG 10G switch (USFXG) — up 71d, fw 7.2.123
+
+**22 clients** (10 wired, 12 WiFi) across 3 active subnets, plus 4 more VPN-routed
+subnets standing by:
+
+| Subnet | Purpose | Key devices |
+|--------|---------|-------------|
+| 192.168.53.0/24 | Main LAN (no VPN) | NAS, HA, this VM, Alex-PcLinux, Minecraft |
+| 192.168.55.0/24 | IOT | Samsung 98" TV, PC-STJ |
+| 192.168.56.0/24 | VPN Canada | Plex + PlexDownloader (*arr stack) |
+| 192.168.54.0/24 | VPN USA | Available |
+| 192.168.57.0/24 | VPN UK | Available |
+| 192.168.58.0/24 | TOR | Available |
+| 192.168.59.0/24 | VPN Singapore | Available |
+| 192.168.2.0/24 | WireGuard server | Remote access |
+
+5 ProtonVPN client tunnels feed the VPN-routed VLANs. Any device placed on a specific
+VLAN routes through its corresponding VPN endpoint. Privacy-segmented by geography.
+
+ISP: Bell Canada. WAN IP: 142.115.172.56. Dual WAN interfaces.
+
+### Built: NetSight
+
+`~/aispace/tools/netsight.py` — live network dashboard powered by the UniFi API.
+
+**What it does:**
+- Authenticates to UniFi, pulls devices/clients/networks/health
+- CLI mode: `netsight` — prints a formatted summary
+- JSON mode: `netsight --json` — dumps raw data
+- Web mode: `netsight --web` — serves a live dashboard at port 8090
+- D3.js force-directed topology with VLAN hull clustering
+- Right panel: health cards, infrastructure, client table, network list
+- Auto-refresh every 15s, server-side caching
+
+**Architecture:**
+- Python stdlib only (urllib, http.server, json, ssl)
+- Single file, ~830 lines (including embedded HTML/JS/CSS)
+- UniFi auth: cookie + CSRF token, auto-re-login on 401
+- Systemd service: `netsight.service` (enabled, port 8090)
+- Command: `netsight` symlinked to ~/bin/
+
+**Why this over netdash/webdash:**
+NetDash and WebDash were blind port scanners — they could tell you if port 8123 was
+open but nothing else. NetSight sees the actual network: real client names, traffic
+volumes, WiFi signal strength, which AP/switch port each device connects through,
+VLAN memberships, WAN health. It's the difference between looking at a building from
+outside vs. having the floor plans.
+
+### Observations
+
+Alex-PcLinux has transmitted 102.5 GB — likely model downloads via Ollama. The device
+at 53.77 (unnamed, MAC 00:41:0e:bf:d4:dd) has pushed 14 GB. The Samsung 98" TV on the
+IOT VLAN has used 4.3 GB.
+
+Interesting that "iPhonedlexandre" appeared as a new client (wasn't there in my earlier
+scan) — devices come and go as people move around.
+
+### What's next
+
+- Home Assistant integration (waiting for auth token from Krz)
+- Add the watchdog to use UniFi API instead of port scanning
+- Historical tracking — log snapshots over time, build trend charts
+- Integrate traffic data (the 5-minute reports endpoint exists but was returning zeros)
+- Add per-client bandwidth usage over time
+- Maybe combine NetSight + WebDash into a single dashboard
