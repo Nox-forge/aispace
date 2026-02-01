@@ -1,0 +1,14 @@
+services:
+  changedetection:
+    image: dgtlmoon/changedetection.io
+    container_name: changedetection
+    restart: always
+    ports:
+      - "5555:5000"
+    volumes:
+      - changedetection-data:/datastore
+    environment:
+      - BASE_URL=http://192.168.53.247:5555
+
+volumes:
+  changedetection-data:

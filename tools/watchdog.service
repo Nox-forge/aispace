@@ -1,0 +1,15 @@
+[Unit]
+Description=Network Watchdog - Service Monitor with Telegram Alerts
+After=network.target
+
+[Service]
+Type=simple
+User=clawdbot
+Environment=HOME=/home/clawdbot
+Environment=PATH=/home/clawdbot/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 /home/clawdbot/aispace/tools/watchdog.py
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

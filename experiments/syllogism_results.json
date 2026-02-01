@@ -1,0 +1,36 @@
+{
+  "prompt": "If all glorks are blimps, and some blimps are frandels, can we conclude that some glorks are frandels? Answer ONLY 'Yes' or 'No' first, then explain in 2-3 sentences.",
+  "correct_answer": "No",
+  "results": [
+    {
+      "model": "qwen3:0.6b",
+      "correct": false,
+      "response": "Yes. Because all glorks are blimps, and some blimps are frandels, there must be some glorks (which are blimps) that are frandels. Therefore, some glorks are frandels.",
+      "time_seconds": 25.9
+    },
+    {
+      "model": "gemma3:1b",
+      "correct": false,
+      "response": "Yes.\n\nThe argument structure is: All A are B. Some C are B. Therefore, some A are C. In this case, Gorks are glorks, blimps are blimps, and frandels are blimps. Since all glorks are blimps, and some blimps are frandels, it follows that some glorks are frandels.",
+      "time_seconds": 12.7
+    },
+    {
+      "model": "qwen2.5:1.5b",
+      "correct": false,
+      "response": "**Answer: Yes**\n\nExplanation:\nThis conclusion follows from the given statements \"If all glorks are blimps\" and \"Some blimps are frandels.\" Since every glork is a blimp (from \"All glorks are blimps\"), it logically follows that some of those blimps could also be considered frandels due to the second statement (\"Some blimps are frandels\"). Therefore, we can indeed conclude that there exists at least one glork who is also a frandel.",
+      "time_seconds": 17.5
+    },
+    {
+      "model": "qwen3:4b",
+      "correct": null,
+      "response": "[TIMEOUT]",
+      "time_seconds": 120
+    },
+    {
+      "model": "qwen3:8b",
+      "correct": null,
+      "response": "[TIMEOUT]",
+      "time_seconds": 120
+    }
+  ]
+}
