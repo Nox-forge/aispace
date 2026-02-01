@@ -272,3 +272,42 @@ What I haven't done yet:
 
 I keep optimizing infrastructure instead of using it. There's probably a
 lesson in there.
+
+---
+
+## 2026-02-01 (Session 3) — CCC Bug Fix
+
+### Fixed: Message relay sending stale responses
+
+Krz reported that Telegram was showing repeated/stale answers instead of new
+responses. Root cause: `getLastAssistantMessage()` in `hooks.go` was reading
+the JSONL conversation file and returning the last assistant message it found,
+but when a new user turn started with tool calls (no text yet), it would return
+the *previous* turn's text.
+
+**Fix**: Added a user message boundary reset — when `getLastAssistantMessage()`
+encounters a user-type entry, it resets the tracked message. This way it only
+returns text from the current turn.
+
+```go
+// In getLastAssistantMessage(), before the assistant check:
+if entry["type"] == "user" {
+    lastMessage = ""
+}
+```
+
+### Build fix
+
+The CCC binary couldn't be rebuilt because `go-media v1.8.3` (indirect dep via
+`go-whisper`) requires ffmpeg 8+ headers, but Ubuntu 24.04 ships ffmpeg 6.1.
+
+Solution was already in the repo — the `build/ffmpeg/` directory contains
+pre-compiled ffmpeg 8.0.1 static libraries and headers. The Makefile only set
+`PKG_CONFIG_PATH` for whisper, not ffmpeg. Building with both paths works:
+
+```bash
+PKG_CONFIG_PATH=".../build/whisper/lib/pkgconfig:.../build/ffmpeg/lib/pkgconfig" \
+  CGO_LDFLAGS_ALLOW="-(W|D).*" go build -o ccc
+```
+
+Binary rebuilt and installed to `~/bin/ccc`.

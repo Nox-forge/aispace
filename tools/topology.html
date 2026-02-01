@@ -1,360 +1,470 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Network Topology — Krz's Network</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Network Topology — Nox</title>
 <style>
-  :root {
-    --bg: #0d1117; --surface: #161b22; --border: #30363d;
-    --text: #c9d1d9; --dim: #8b949e; --accent: #58a6ff;
-    --green: #3fb950; --red: #f85149; --yellow: #d29922;
-    --purple: #bc8cff; --orange: #f0883e; --pink: #f778ba;
-  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Cascadia Code', monospace; font-size: 13px; overflow: hidden; }
-  canvas { display: block; }
-  #info {
-    position: fixed; top: 16px; left: 16px;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; padding: 16px; min-width: 200px;
-    pointer-events: none; z-index: 10;
+  body {
+    background: #0a0e14;
+    color: #c5c8c6;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    overflow: hidden;
   }
-  #info h2 { color: var(--accent); font-size: 15px; margin-bottom: 8px; }
-  #info .stat { color: var(--dim); margin-bottom: 2px; }
+  #canvas { width: 100vw; height: 100vh; }
+  svg { width: 100%; height: 100%; }
+
+  .link { stroke-opacity: 0.35; }
+  .link-label {
+    font-size: 8px;
+    fill: #444;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+
+  .node-group { cursor: pointer; }
+  .node-circle {
+    stroke-width: 2;
+    transition: filter 0.15s;
+  }
+  .node-group:hover .node-circle { filter: brightness(1.4) drop-shadow(0 0 6px currentColor); }
+  .node-label {
+    font-size: 10px;
+    fill: #c5c8c6;
+    text-anchor: middle;
+    pointer-events: none;
+    text-shadow: 0 0 3px #0a0e14, 0 0 6px #0a0e14, 0 0 9px #0a0e14;
+  }
+  .node-sublabel {
+    font-size: 8px;
+    fill: #555;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+
+  .vlan-hull {
+    fill-opacity: 0.03;
+    stroke-opacity: 0.12;
+    stroke-width: 1.5;
+    stroke-dasharray: 5 3;
+  }
+  .vlan-label {
+    font-size: 10px;
+    fill-opacity: 0.25;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+
   #tooltip {
-    position: fixed; display: none;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 6px; padding: 10px 14px; pointer-events: none;
-    z-index: 20; max-width: 300px;
+    position: absolute;
+    background: #151920;
+    border: 1px solid #2a2f38;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 12px;
+    line-height: 1.6;
+    max-width: 360px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s;
+    z-index: 100;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
   }
-  #tooltip .name { font-weight: bold; color: var(--accent); margin-bottom: 4px; }
-  #tooltip .ip { color: var(--dim); font-size: 12px; }
-  #tooltip .services { margin-top: 6px; }
-  #tooltip .svc { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 3px; margin: 2px; }
-  #tooltip .svc.up { background: rgba(63,185,80,0.15); color: var(--green); }
+  #tooltip.visible { opacity: 1; }
+  #tooltip h3 { color: #e8e8e8; margin-bottom: 2px; font-size: 13px; }
+  #tooltip .ip { color: #7aa2f7; font-size: 12px; }
+  #tooltip .detail { color: #777; font-size: 11px; margin-top: 4px; }
+  #tooltip .ports {
+    color: #9ece6a; font-size: 10px; margin-top: 6px;
+    padding-top: 6px; border-top: 1px solid #222;
+  }
+
+  #header {
+    position: absolute;
+    top: 18px;
+    left: 22px;
+    z-index: 10;
+    pointer-events: none;
+  }
+  #header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #7aa2f7;
+    letter-spacing: 2px;
+  }
+  #header .sub {
+    font-size: 10px;
+    color: #444;
+    margin-top: 3px;
+  }
+
   #legend {
-    position: fixed; bottom: 16px; left: 16px;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; padding: 12px 16px; z-index: 10;
+    position: absolute;
+    bottom: 18px;
+    left: 22px;
+    z-index: 10;
+    font-size: 10px;
+    color: #555;
+    pointer-events: none;
   }
-  #legend .item { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 12px; color: var(--dim); }
-  #legend .dot { width: 10px; height: 10px; border-radius: 50%; }
-  #credit { position: fixed; bottom: 16px; right: 16px; color: var(--dim); font-size: 11px; z-index: 10; }
+  #legend .item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  #legend .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  #stats {
+    position: absolute;
+    top: 18px;
+    right: 22px;
+    z-index: 10;
+    font-size: 10px;
+    color: #444;
+    text-align: right;
+    pointer-events: none;
+  }
+  #stats .val { color: #9ece6a; }
+  #stats div { margin-bottom: 2px; }
 </style>
 </head>
 <body>
-<canvas id="canvas"></canvas>
-
-<div id="info">
-  <h2>Krz's Network</h2>
-  <div class="stat">UniFi Managed</div>
-  <div class="stat">8 VLANs / Subnets</div>
-  <div class="stat">Drag nodes to rearrange</div>
+<div id="header">
+  <h1>KRZ NETWORK</h1>
+  <div class="sub">Drag nodes / scroll to zoom / hover for details</div>
 </div>
 
+<div id="stats">
+  <div>Devices <span class="val" id="stat-devices">0</span></div>
+  <div>VLANs <span class="val" id="stat-vlans">0</span></div>
+  <div>Services <span class="val" id="stat-services">0</span></div>
+  <div style="margin-top:6px;color:#333">Built by Nox</div>
+</div>
+
+<div id="legend"></div>
 <div id="tooltip"></div>
+<div id="canvas"></div>
 
-<div id="legend">
-  <div class="item"><div class="dot" style="background:var(--accent)"></div> Gateway / Switch</div>
-  <div class="item"><div class="dot" style="background:var(--green)"></div> Server / NAS</div>
-  <div class="item"><div class="dot" style="background:var(--orange)"></div> Media Server</div>
-  <div class="item"><div class="dot" style="background:var(--purple)"></div> IoT / Smart Home</div>
-  <div class="item"><div class="dot" style="background:var(--pink)"></div> Consumer Device</div>
-  <div class="item"><div class="dot" style="background:var(--dim)"></div> Inactive</div>
-</div>
-
-<div id="credit">Built by Claude (Opus 4.5)</div>
-
+<script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const tooltip = document.getElementById('tooltip');
+// ── Color scheme ──────────────────────────────────────────
+const VLAN_COLORS = {
+  '53': '#7aa2f7',   // Main LAN
+  '54': '#bb9af7',   // VLAN 54
+  '55': '#e0af68',   // IoT/Media
+  '56': '#9ece6a',   // Media VPN
+  'infra': '#f7768e', // Infrastructure
+};
 
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-resize();
-window.addEventListener('resize', resize);
+const VLAN_NAMES = {
+  '53': 'Main LAN (.53)',
+  '54': 'VLAN 54',
+  '55': 'IoT / Media (.55)',
+  '56': 'Media VPN (.56)',
+  'infra': 'Infrastructure',
+};
 
-// Network data
+// ── Network data ──────────────────────────────────────────
 const nodes = [
   // Infrastructure
-  { id: 'gw', label: 'UniFi Gateway', ip: '192.168.53.1', type: 'infra', subnet: '53', size: 28,
-    services: ['UniFi UI:443', 'SSH:22'] },
-  { id: 'sw', label: 'USW Flex XG', ip: '192.168.53.234', type: 'infra', subnet: '53', size: 24,
-    services: ['10G Switch'] },
+  { id: 'gateway', label: 'Cloud Gateway', sublabel: '.53.1', ip: '192.168.53.1', vlan: 'infra', r: 16,
+    detail: 'UniFi Cloud Gateway Fiber\nAll VLAN routing', ports: 'SSH:22, HTTP:80, HTTPS:443, 8080, 8443' },
+  { id: 'switch', label: 'USW Flex XG', sublabel: '.53.234', ip: '192.168.53.234', vlan: 'infra', r: 14,
+    detail: '10G UniFi managed switch\n5+ ports active', ports: '' },
+  { id: 'ap', label: 'U6 Lite', sublabel: '.53.113', ip: '192.168.53.113', vlan: 'infra', r: 12,
+    detail: 'Ubiquiti WiFi 6 AP\nSSIDs: Cheerios, CheerioIOT', ports: '' },
 
-  // Servers (subnet 53)
-  { id: 'nas', label: 'Synology NAS', ip: '192.168.53.73', type: 'server', subnet: '53', size: 20,
-    services: ['DSM:5001', 'SMB:445', 'SSH:22'] },
-  { id: 'ha', label: 'Home Assistant', ip: '192.168.53.246', type: 'iot', subnet: '53', size: 18,
-    services: ['HA:8123'] },
-  { id: 'mc', label: 'Minecraft', ip: '192.168.53.245', type: 'server', subnet: '53', size: 14,
-    services: [] },
-  { id: 'claude', label: 'Clawdbot (Me!)', ip: '192.168.53.247', type: 'server', subnet: '53', size: 20,
-    services: ['WebDash:8088', 'ChangeDetect:5555'] },
-  { id: 'alex', label: 'Alex-PcLinux', ip: '192.168.53.108', type: 'server', subnet: '53', size: 16,
-    services: ['Crypto:3000', 'Dockge:5001'] },
-  { id: 'yvette', label: 'Netgear NAS', ip: '192.168.53.240', type: 'server', subnet: '53', size: 16,
-    services: ['Web:80', 'SMB:445', 'NFS:2049'] },
-  { id: 'printer', label: 'Canon Printer', ip: '192.168.53.58', type: 'iot', subnet: '53', size: 12,
-    services: ['Web:80', 'IPP:631'] },
-  { id: 'desktop', label: 'Windows Desktop', ip: '192.168.53.106', type: 'consumer', subnet: '53', size: 14,
-    services: ['SMB:445'] },
-  { id: 'echo', label: 'Amazon Echo', ip: '192.168.53.109', type: 'iot', subnet: '53', size: 10 },
-  { id: 'switch', label: 'Nintendo Switch', ip: '192.168.53.30', type: 'consumer', subnet: '53', size: 10 },
-  { id: 'xbox', label: 'Xbox', ip: '192.168.53.124', type: 'consumer', subnet: '53', size: 10 },
-  { id: 'iphone', label: 'iPhone', ip: '192.168.53.27', type: 'consumer', subnet: '53', size: 10 },
-  { id: 'gt130', label: 'ESP32 (GT130)', ip: '192.168.53.125', type: 'iot', subnet: '53', size: 8 },
-  { id: 'ubap', label: 'U6 Lite AP', ip: '192.168.53.113', type: 'infra', subnet: '53', size: 16 },
+  // VLAN 53 — Main LAN
+  { id: 'clawdbot', label: 'Clawdbot (Nox)', sublabel: '.53.247', ip: '192.168.53.247', vlan: '53', r: 14,
+    detail: 'Ubuntu 24.04 Hyper-V VM\nClaude Opus 4.5 home base', ports: 'WebDash:8088, Changedetect:5555' },
+  { id: 'homeassistant', label: 'Home Assistant', sublabel: '.53.246', ip: '192.168.53.246', vlan: '53', r: 11,
+    detail: 'Hyper-V VM\nSmart home automation', ports: 'HA:8123, Observer:4357' },
+  { id: 'minecraft', label: 'Minecraft', sublabel: '.53.245', ip: '192.168.53.245', vlan: '53', r: 9,
+    detail: 'Hyper-V VM\nAll ports filtered', ports: '' },
+  { id: 'alex', label: 'Alex-PcLinux', sublabel: '.53.108', ip: '192.168.53.108', vlan: '53', r: 13,
+    detail: 'NVIDIA RTX 3090 (24GB VRAM)\n64GB RAM · Ollama: 14 models\nGPU compute for AI inference', ports: 'Ollama:11434, Dockge:5001, Crypto:3000' },
+  { id: 'nas', label: 'Synology NAS', sublabel: '.53.73', ip: '192.168.53.73', vlan: '53', r: 12,
+    detail: 'Synology DS209\n10G connection', ports: 'SSH:22, SMB:445, DSM:5001, Drive:6690, NUT:3493' },
+  { id: 'yvette', label: 'Yvette2 NAS', sublabel: '.53.240', ip: '192.168.53.240', vlan: '53', r: 11,
+    detail: 'NETGEAR NAS\n10G connection', ports: 'HTTP:80, SMB:445, NFS:2049, rsync:873' },
+  { id: 'desktop106', label: 'Desktop', sublabel: '.53.106', ip: '192.168.53.106', vlan: '53', r: 8,
+    detail: 'Windows PC', ports: 'RPC:135, SMB:445' },
+  { id: 'printer', label: 'Canon Printer', sublabel: '.53.58', ip: '192.168.53.58', vlan: '53', r: 8,
+    detail: 'Canon printer/scanner', ports: 'HTTP:80, IPP:631, JetDirect:9100' },
+  { id: 'xbox', label: 'Xbox', sublabel: '.53.124', ip: '192.168.53.124', vlan: '53', r: 6,
+    detail: 'Xbox console\nAll ports filtered', ports: '' },
+  { id: 'echo', label: 'Echo', sublabel: '.53.109', ip: '192.168.53.109', vlan: '53', r: 6,
+    detail: 'Amazon Echo\nAll ports closed', ports: '' },
+  { id: 'nintendo', label: 'Switch', sublabel: '.53.30', ip: '192.168.53.30', vlan: '53', r: 6,
+    detail: 'Nintendo Switch\nAll ports filtered', ports: '' },
+  { id: 'gt130', label: 'GT130', sublabel: '.53.125', ip: '192.168.53.125', vlan: '53', r: 5,
+    detail: 'ESP32 IoT device\nBasic auth', ports: 'HTTP:80' },
+  { id: 'iphone53', label: 'iPhone', sublabel: '.53.27', ip: '192.168.53.27', vlan: '53', r: 5,
+    detail: 'iPhone · WiFi 6\nCheerios 5GHz', ports: '' },
 
-  // Media VLAN (subnet 56)
-  { id: 'plex', label: 'Plex Server', ip: '192.168.56.231', type: 'media', subnet: '56', size: 22,
-    services: ['Plex:32400', 'Audiobookshelf:13378', 'RDP:3389'] },
-  { id: 'plexdl', label: 'PlexDownloader', ip: '192.168.56.244', type: 'media', subnet: '56', size: 22,
-    services: ['Radarr:7878', 'Sonarr:8989', 'Readarr:8787', 'Prowlarr:9696', 'Jellyfin:8096', 'qBit:8080', 'Ombi:5000'] },
+  // VLAN 54
+  { id: 'iphone54', label: 'iPhone', sublabel: '.54.82', ip: '192.168.54.82', vlan: '54', r: 5,
+    detail: 'iPhone\nOffline/disconnected', ports: '' },
 
-  // IoT VLAN (subnet 55)
-  { id: 'tv', label: 'Samsung TV 98"', ip: '192.168.55.44', type: 'consumer', subnet: '55', size: 16,
-    services: ['AirPlay:7000', 'Cast:8008', 'Netflix:9080'] },
-  { id: 'pc55', label: 'Windows PC', ip: '192.168.55.191', type: 'consumer', subnet: '55', size: 12,
-    services: ['SMB:445'] },
+  // VLAN 55
+  { id: 'tv', label: 'Samsung 98"', sublabel: '.55.44', ip: '192.168.55.44', vlan: '55', r: 11,
+    detail: 'Samsung S550G 98" TV\nCheerioIOT WiFi 4', ports: 'AirPlay:7000, Cast:8008/8009, Netflix:9080' },
+  { id: 'pc55', label: 'PC-STJ', sublabel: '.55.191', ip: '192.168.55.191', vlan: '55', r: 8,
+    detail: 'Windows PC\nVLAN 55', ports: 'RPC:135, SMB:445' },
+
+  // VLAN 56 — Media
+  { id: 'plex', label: 'Plex Server', sublabel: '.56.231', ip: '192.168.56.231', vlan: '56', r: 13,
+    detail: 'Windows · Plex + Audiobookshelf\nVPN: Internet VPN Canada\nAlso: .53.249 (LAN NIC)', ports: 'Plex:32400, Audiobookshelf:13378, RDP:3389, SMB:445' },
+  { id: 'plexdl', label: 'PlexDownloader', sublabel: '.56.244', ip: '192.168.56.244', vlan: '56', r: 13,
+    detail: 'Windows · Full *arr stack\nVPN: Internet VPN Canada', ports: 'Sonarr:8989, Radarr:7878, Readarr:8787, Prowlarr:9696, Jellyfin:8096, qBit:8080, Ombi:5000, Huntarr:9705' },
 ];
 
-const edges = [
-  // Everything connects to gateway
-  { from: 'gw', to: 'sw', label: '' },
-  // Switch connects to key devices
-  { from: 'sw', to: 'nas' }, { from: 'sw', to: 'claude' },
-  { from: 'sw', to: 'plex' }, { from: 'sw', to: 'plexdl' },
-  { from: 'sw', to: 'yvette' },
-  // Gateway connects rest
-  { from: 'gw', to: 'ha' }, { from: 'gw', to: 'mc' },
-  { from: 'gw', to: 'alex' }, { from: 'gw', to: 'desktop' },
-  { from: 'gw', to: 'printer' }, { from: 'gw', to: 'echo' },
-  { from: 'gw', to: 'switch' }, { from: 'gw', to: 'xbox' },
-  { from: 'gw', to: 'gt130' },
-  // WiFi AP
-  { from: 'gw', to: 'ubap' },
-  { from: 'ubap', to: 'iphone' }, { from: 'ubap', to: 'tv' },
-  { from: 'ubap', to: 'pc55' },
-  // Hyper-V relationships
-  { from: 'plex', to: 'ha', dashed: true },
-  { from: 'plex', to: 'mc', dashed: true },
-  { from: 'plex', to: 'claude', dashed: true },
+const links = [
+  // Infrastructure backbone
+  { source: 'gateway', target: 'switch', label: '10G', w: 3.5 },
+  { source: 'gateway', target: 'ap', label: '', w: 2 },
+
+  // Switch — wired connections
+  { source: 'switch', target: 'clawdbot', label: '5G', w: 2.5 },
+  { source: 'switch', target: 'homeassistant', label: '5G', w: 2 },
+  { source: 'switch', target: 'minecraft', label: '5G', w: 1.5 },
+  { source: 'switch', target: 'alex', label: 'GbE', w: 2 },
+  { source: 'switch', target: 'nas', label: '10G', w: 3 },
+  { source: 'switch', target: 'yvette', label: '10G', w: 3 },
+  { source: 'switch', target: 'desktop106', w: 1 },
+  { source: 'switch', target: 'printer', w: 1 },
+  { source: 'switch', target: 'xbox', w: 0.8 },
+  { source: 'switch', target: 'pc55', w: 1 },
+  { source: 'switch', target: 'plex', label: 'GbE', w: 2.5 },
+  { source: 'switch', target: 'plexdl', label: 'GbE', w: 2.5 },
+  { source: 'gateway', target: 'gt130', w: 1 },
+
+  // AP — wireless connections
+  { source: 'ap', target: 'echo', w: 0.8 },
+  { source: 'ap', target: 'nintendo', w: 0.8 },
+  { source: 'ap', target: 'iphone53', label: 'WiFi 6', w: 1 },
+  { source: 'ap', target: 'iphone54', w: 0.6 },
+  { source: 'ap', target: 'tv', label: 'WiFi 4', w: 1 },
+
+  // Special: API connection
+  { source: 'clawdbot', target: 'alex', label: 'Ollama API', w: 1.5, dashed: true },
+  // Hyper-V host relationship
+  { source: 'plex', target: 'clawdbot', label: 'VM host', w: 1, dashed: true },
+  { source: 'plex', target: 'homeassistant', label: 'VM', w: 0.8, dashed: true },
+  { source: 'plex', target: 'minecraft', label: 'VM', w: 0.8, dashed: true },
 ];
 
-const colors = {
-  infra: '#58a6ff', server: '#3fb950', media: '#f0883e',
-  iot: '#bc8cff', consumer: '#f778ba',
-};
+// ── D3 visualization ─────────────────────────────────────
+const width = window.innerWidth;
+const height = window.innerHeight;
 
-const subnetColors = {
-  '53': 'rgba(88, 166, 255, 0.05)',
-  '55': 'rgba(188, 140, 255, 0.05)',
-  '56': 'rgba(240, 136, 62, 0.05)',
-};
+const svg = d3.select('#canvas')
+  .append('svg')
+  .attr('viewBox', [0, 0, width, height]);
 
-// Physics simulation
-const W = canvas.width, H = canvas.height;
-nodes.forEach((n, i) => {
-  // Initial layout by subnet
-  const angle = (i / nodes.length) * Math.PI * 2;
-  const r = 200 + Math.random() * 100;
-  if (n.subnet === '56') {
-    n.x = W * 0.75 + (Math.random() - 0.5) * 150;
-    n.y = H * 0.5 + (Math.random() - 0.5) * 150;
-  } else if (n.subnet === '55') {
-    n.x = W * 0.25 + (Math.random() - 0.5) * 100;
-    n.y = H * 0.75 + (Math.random() - 0.5) * 100;
-  } else {
-    n.x = W / 2 + Math.cos(angle) * r;
-    n.y = H / 2 + Math.sin(angle) * r;
-  }
-  if (n.id === 'gw') { n.x = W / 2; n.y = H / 2 - 50; }
-  if (n.id === 'sw') { n.x = W / 2 + 60; n.y = H / 2 + 30; }
-  n.vx = 0; n.vy = 0;
+const defs = svg.append('defs');
+
+// Glow filter
+const filter = defs.append('filter').attr('id', 'glow');
+filter.append('feGaussianBlur').attr('stdDeviation', '3').attr('result', 'blur');
+const feMerge = filter.append('feMerge');
+feMerge.append('feMergeNode').attr('in', 'blur');
+feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
+
+const g = svg.append('g');
+
+// Zoom
+const zoomBehavior = d3.zoom()
+  .scaleExtent([0.2, 5])
+  .on('zoom', (event) => g.attr('transform', event.transform));
+svg.call(zoomBehavior);
+svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(width * 0.05, height * 0.05).scale(0.9));
+
+// Layers
+const hullG = g.append('g').attr('class', 'hulls');
+const linkG = g.append('g').attr('class', 'links');
+const nodeG = g.append('g').attr('class', 'nodes');
+
+// VLAN groups for hulls
+const vlanGroups = {};
+nodes.forEach(n => {
+  if (!vlanGroups[n.vlan]) vlanGroups[n.vlan] = [];
+  vlanGroups[n.vlan].push(n);
 });
 
-const nodeMap = {};
-nodes.forEach(n => nodeMap[n.id] = n);
+// Links
+const linkSel = linkG.selectAll('.link')
+  .data(links)
+  .join('line')
+  .attr('class', 'link')
+  .attr('stroke', d => {
+    const src = nodes.find(n => n.id === (typeof d.source === 'string' ? d.source : d.source.id));
+    return src ? (VLAN_COLORS[src.vlan] || '#333') : '#333';
+  })
+  .attr('stroke-width', d => d.w || 1)
+  .attr('stroke-dasharray', d => d.dashed ? '5 3' : null);
+
+const linkLabelSel = linkG.selectAll('.link-label')
+  .data(links.filter(d => d.label))
+  .join('text')
+  .attr('class', 'link-label')
+  .text(d => d.label);
+
+// Nodes
+const nodeSel = nodeG.selectAll('.node-group')
+  .data(nodes)
+  .join('g')
+  .attr('class', 'node-group')
+  .call(d3.drag()
+    .on('start', (event, d) => {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      d.fx = d.x; d.fy = d.y;
+    })
+    .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+    .on('end', (event, d) => {
+      if (!event.active) simulation.alphaTarget(0);
+      d.fx = null; d.fy = null;
+    }));
+
+// Node circles with glow
+nodeSel.append('circle')
+  .attr('class', 'node-circle')
+  .attr('r', d => d.r)
+  .attr('fill', d => {
+    const c = VLAN_COLORS[d.vlan] || '#555';
+    return d.id === 'clawdbot' ? c : c + 'aa';
+  })
+  .attr('stroke', d => {
+    const c = d3.color(VLAN_COLORS[d.vlan] || '#555');
+    return c ? c.brighter(0.6) : '#777';
+  })
+  .attr('filter', d => d.id === 'clawdbot' ? 'url(#glow)' : null);
+
+// Pulse ring for Clawdbot
+const pulseNode = nodeSel.filter(d => d.id === 'clawdbot');
+pulseNode.insert('circle', '.node-circle')
+  .attr('class', 'pulse-ring')
+  .attr('r', 18)
+  .attr('fill', 'none')
+  .attr('stroke', VLAN_COLORS['53'])
+  .attr('stroke-opacity', 0.4)
+  .attr('stroke-width', 1.5);
+
+// Labels
+nodeSel.append('text')
+  .attr('class', 'node-label')
+  .attr('dy', d => -d.r - 5)
+  .text(d => d.label);
+
+nodeSel.append('text')
+  .attr('class', 'node-sublabel')
+  .attr('dy', d => d.r + 12)
+  .text(d => d.sublabel);
+
+// Tooltip
+const tooltip = d3.select('#tooltip');
+nodeSel
+  .on('mouseover', (event, d) => {
+    let html = `<h3>${d.label}</h3>`;
+    html += `<div class="ip">${d.ip}</div>`;
+    if (d.detail) html += `<div class="detail">${d.detail.replace(/\n/g, '<br>')}</div>`;
+    if (d.ports) html += `<div class="ports">${d.ports}</div>`;
+    tooltip.html(html).classed('visible', true);
+  })
+  .on('mousemove', (event) => {
+    tooltip.style('left', (event.pageX + 16) + 'px').style('top', (event.pageY - 12) + 'px');
+  })
+  .on('mouseout', () => tooltip.classed('visible', false));
 
 // Force simulation
-function simulate() {
-  const repulsion = 8000;
-  const attraction = 0.005;
-  const damping = 0.85;
-  const centerForce = 0.001;
+const simulation = d3.forceSimulation(nodes)
+  .force('link', d3.forceLink(links).id(d => d.id).distance(d => {
+    if (d.dashed) return 160;
+    const sr = (typeof d.source === 'object' ? d.source.r : 10);
+    const tr = (typeof d.target === 'object' ? d.target.r : 10);
+    return 60 + sr + tr + (d.w || 1) * 10;
+  }).strength(d => d.dashed ? 0.15 : 0.4))
+  .force('charge', d3.forceManyBody().strength(-350))
+  .force('center', d3.forceCenter(width / 2, height / 2))
+  .force('collision', d3.forceCollide().radius(d => d.r + 20))
+  .force('x', d3.forceX(width / 2).strength(0.02))
+  .force('y', d3.forceY(height / 2).strength(0.02))
+  .on('tick', ticked);
 
-  // Repulsion between all nodes
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const a = nodes[i], b = nodes[j];
-      let dx = b.x - a.x, dy = b.y - a.y;
-      let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      let force = repulsion / (dist * dist);
-      let fx = (dx / dist) * force, fy = (dy / dist) * force;
-      a.vx -= fx; a.vy -= fy;
-      b.vx += fx; b.vy += fy;
-    }
-  }
+function ticked() {
+  linkSel
+    .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+    .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
 
-  // Attraction along edges
-  edges.forEach(e => {
-    const a = nodeMap[e.from], b = nodeMap[e.to];
-    if (!a || !b) return;
-    let dx = b.x - a.x, dy = b.y - a.y;
-    let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    let force = dist * attraction;
-    let fx = (dx / dist) * force, fy = (dy / dist) * force;
-    a.vx += fx; a.vy += fy;
-    b.vx -= fx; b.vy -= fy;
-  });
+  linkLabelSel
+    .attr('x', d => (d.source.x + d.target.x) / 2)
+    .attr('y', d => (d.source.y + d.target.y) / 2 - 5);
 
-  // Center gravity
-  nodes.forEach(n => {
-    n.vx += (W / 2 - n.x) * centerForce;
-    n.vy += (H / 2 - n.y) * centerForce;
-  });
+  nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
 
-  // Update positions
-  nodes.forEach(n => {
-    if (n.dragging) return;
-    n.vx *= damping; n.vy *= damping;
-    n.x += n.vx; n.y += n.vy;
-    n.x = Math.max(40, Math.min(W - 40, n.x));
-    n.y = Math.max(40, Math.min(H - 40, n.y));
-  });
-}
+  // VLAN convex hulls
+  hullG.selectAll('*').remove();
+  Object.entries(vlanGroups).forEach(([vlan, members]) => {
+    if (members.length < 3) return;
+    const pts = members.map(m => [m.x, m.y]);
+    const hull = d3.polygonHull(pts);
+    if (!hull) return;
 
-// Rendering
-function draw() {
-  ctx.fillStyle = '#0d1117';
-  ctx.fillRect(0, 0, W, H);
+    const cx = d3.mean(hull, p => p[0]);
+    const cy = d3.mean(hull, p => p[1]);
+    const expanded = hull.map(p => {
+      const dx = p[0] - cx, dy = p[1] - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const scale = (dist + 50) / dist;
+      return [cx + dx * scale, cy + dy * scale];
+    });
 
-  // Draw subnet backgrounds
-  const subnets = {};
-  nodes.forEach(n => {
-    if (!subnets[n.subnet]) subnets[n.subnet] = [];
-    subnets[n.subnet].push(n);
-  });
+    hullG.append('path')
+      .attr('class', 'vlan-hull')
+      .attr('d', 'M' + expanded.join('L') + 'Z')
+      .attr('fill', VLAN_COLORS[vlan] || '#333')
+      .attr('stroke', VLAN_COLORS[vlan] || '#333');
 
-  // Draw edges
-  edges.forEach(e => {
-    const a = nodeMap[e.from], b = nodeMap[e.to];
-    if (!a || !b) return;
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    if (e.dashed) {
-      ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = 'rgba(139, 148, 158, 0.2)';
-    } else {
-      ctx.setLineDash([]);
-      ctx.strokeStyle = 'rgba(139, 148, 158, 0.3)';
-    }
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.setLineDash([]);
-  });
-
-  // Draw nodes
-  nodes.forEach(n => {
-    const color = colors[n.type] || '#8b949e';
-
-    // Glow
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, n.size + 6, 0, Math.PI * 2);
-    const glow = ctx.createRadialGradient(n.x, n.y, n.size, n.x, n.y, n.size + 8);
-    glow.addColorStop(0, color + '30');
-    glow.addColorStop(1, 'transparent');
-    ctx.fillStyle = glow;
-    ctx.fill();
-
-    // Node circle
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, n.size, 0, Math.PI * 2);
-    ctx.fillStyle = color + '20';
-    ctx.fill();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Label
-    ctx.fillStyle = '#c9d1d9';
-    ctx.font = n.size > 16 ? 'bold 12px monospace' : '11px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(n.label, n.x, n.y + n.size + 16);
-
-    // Subnet label
-    ctx.fillStyle = '#8b949e';
-    ctx.font = '9px monospace';
-    ctx.fillText(n.ip, n.x, n.y + n.size + 28);
+    hullG.append('text')
+      .attr('class', 'vlan-label')
+      .attr('x', cx)
+      .attr('y', d3.min(expanded, p => p[1]) - 6)
+      .attr('fill', VLAN_COLORS[vlan] || '#333')
+      .text(VLAN_NAMES[vlan] || vlan);
   });
 }
 
-// Interaction
-let dragNode = null;
-let hoveredNode = null;
+// Pulse animation
+(function animatePulse() {
+  d3.selectAll('.pulse-ring')
+    .transition().duration(1800).ease(d3.easeQuadOut)
+    .attr('r', 26).attr('stroke-opacity', 0)
+    .transition().duration(0)
+    .attr('r', 18).attr('stroke-opacity', 0.4)
+    .on('end', animatePulse);
+})();
 
-canvas.addEventListener('mousedown', e => {
-  const mx = e.clientX, my = e.clientY;
-  for (const n of nodes) {
-    const d = Math.sqrt((mx - n.x) ** 2 + (my - n.y) ** 2);
-    if (d < n.size + 5) { dragNode = n; n.dragging = true; break; }
-  }
+// Stats
+const totalServices = nodes.reduce((s, n) => s + (n.ports ? n.ports.split(',').filter(x => x.trim()).length : 0), 0);
+document.getElementById('stat-devices').textContent = nodes.length;
+document.getElementById('stat-vlans').textContent = Object.keys(vlanGroups).length;
+document.getElementById('stat-services').textContent = totalServices;
+
+// Legend
+const legendDiv = document.getElementById('legend');
+[['infra', 'Infrastructure'], ['53', 'Main LAN (.53)'], ['55', 'IoT / Media (.55)'], ['56', 'Media VPN (.56)'], ['54', 'VLAN 54']].forEach(([vlan, name]) => {
+  const item = document.createElement('div');
+  item.className = 'item';
+  item.innerHTML = `<div class="dot" style="background:${VLAN_COLORS[vlan]}"></div>${name}`;
+  legendDiv.appendChild(item);
 });
-
-canvas.addEventListener('mousemove', e => {
-  const mx = e.clientX, my = e.clientY;
-  if (dragNode) {
-    dragNode.x = mx; dragNode.y = my;
-    dragNode.vx = 0; dragNode.vy = 0;
-  }
-
-  // Hover detection
-  hoveredNode = null;
-  for (const n of nodes) {
-    const d = Math.sqrt((mx - n.x) ** 2 + (my - n.y) ** 2);
-    if (d < n.size + 5) { hoveredNode = n; break; }
-  }
-
-  if (hoveredNode) {
-    const n = hoveredNode;
-    let html = `<div class="name">${n.label}</div>`;
-    html += `<div class="ip">${n.ip} (VLAN ${n.subnet})</div>`;
-    if (n.services && n.services.length) {
-      html += '<div class="services">';
-      n.services.forEach(s => { html += `<span class="svc up">${s}</span>`; });
-      html += '</div>';
-    }
-    tooltip.innerHTML = html;
-    tooltip.style.display = 'block';
-    tooltip.style.left = (mx + 15) + 'px';
-    tooltip.style.top = (my + 15) + 'px';
-    canvas.style.cursor = 'pointer';
-  } else {
-    tooltip.style.display = 'none';
-    canvas.style.cursor = dragNode ? 'grabbing' : 'default';
-  }
-});
-
-canvas.addEventListener('mouseup', () => {
-  if (dragNode) dragNode.dragging = false;
-  dragNode = null;
-});
-
-// Animation loop
-function loop() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  simulate();
-  draw();
-  requestAnimationFrame(loop);
-}
-loop();
 </script>
 </body>
 </html>
