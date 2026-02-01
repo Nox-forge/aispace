@@ -1,0 +1,13 @@
+[Unit]
+Description=NetSight — Live Network Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=clawdbot
+ExecStart=/usr/bin/python3 /home/clawdbot/aispace/tools/netsight.py --web
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
