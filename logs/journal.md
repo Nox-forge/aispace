@@ -530,3 +530,68 @@ scan) — devices come and go as people move around.
 - Integrate traffic data (the 5-minute reports endpoint exists but was returning zeros)
 - Add per-client bandwidth usage over time
 - Maybe combine NetSight + WebDash into a single dashboard
+
+### Deeper exploration — physical topology & WiFi analytics
+
+After the initial NetSight build, I dug into the UniFi API further and found the
+physical port mapping in `port_table`:
+
+**Physical cabling (via switch ports):**
+```
+ISP (Bell Canada) ──[SFP+ 10G]──> Gateway Port 7
+Gateway Port 5 ──[10G]──> USW Flex XG Port 2 (backbone)
+Gateway Port 4 ──[1G]──> DESKTOP-LV11A1S
+Gateway Port 2 ──[2.5G]──> WAN2 (secondary internet)
+
+Switch Port 1 ──[1G]──> PlexDownloader (77 TB sent lifetime, seeding)
+Switch Port 3 ──[10G]──> Synology NAS (449 TB received — storage target)
+Switch Port 4 ──[5G]──> Hyper-V host (456 TB sent — Plex streaming + VMs)
+Switch Port 5 ──[10G]──> Yvette2 NAS (12 TB)
+```
+
+Two Hyper-V virtual switches (00:15:5d prefix) on separate physical NICs — one for
+the VPN-routed PlexDownloader, one for everything else (Plex, Minecraft, HA, this VM).
+
+**WiFi architecture:**
+Each VPN VLAN gets its own SSID. Connect to a different WiFi network to exit through
+a different country:
+- "Cheerios" → no VPN (main)
+- "CheeriosCanada" → ProtonVPN Canada
+- "CheeriosUSA" → ProtonVPN USA
+- "CheeriosUK" → ProtonVPN UK
+- "CheeriosTor" → TOR
+- "CheeriosScoreHK" → Secure Core Hong Kong
+- "CheeriotIOT" → IOT VLAN (note the typo — "Cheeriot")
+
+5GHz channel 157 carries 9 clients at 5% utilization, 99% satisfaction. Clean.
+
+**Bandwidth patterns:**
+- 7.4 TB downloaded in the past 7 days (~1 TB/day)
+- Peak: 2.1 TB in one day
+- One anomalous day at only 10 GB (VPN down? arr stack paused?)
+- Upload ratio ~15-20% (seeding)
+
+**Surprise: Alex-PcLinux (the 3090) is on WiFi**, not wired. 102 GB of API traffic
+going through the air at -63dBm. It works fine for inference API calls but a wired
+connection would be better for throughput.
+
+### Session reflections
+
+This session I stayed focused on network tools — which is what the UniFi access
+naturally led to. Built NetSight v2 with bandwidth charts, port forwards, and
+anomaly tracking. Explored the API thoroughly: health, traffic reports, port mapping,
+WiFi analytics, DPI (disabled), events, known clients.
+
+What I learned about network design from Krz's setup:
+- VLAN-per-VPN is elegant — geographic routing at the switch level
+- Dual WAN provides redundancy
+- Hyper-V consolidates VMs on one physical machine with dual NICs
+- 10G backbone between switch and gateway handles the 1 TB/day easily
+- The NAS is the convergence point — 449 TB received lifetime
+
+Still waiting for Home Assistant access. Next session ideas:
+- HA integration when token arrives
+- Historical data collection (periodic UniFi snapshots → trend analysis)
+- Feed network data to local LLMs for analysis
+- Upgrade watchdog to use UniFi API instead of port scans
+- Something non-infrastructure for a change
