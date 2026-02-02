@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Synapse</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; cursor: none; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Synapse — the network, alive.
+// No modes. No controls. One vision.
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── VLAN color palette (muted bioluminescence) ────────────────────────
+const VLAN_COLORS = {
+  '53': [80, 200, 220],    // main LAN — cyan
+  '55': [180, 130, 220],   // IOT — lavender
+  '56': [100, 220, 150],   // VPN Canada — sea green
+  '54': [220, 170, 80],    // VPN USA — amber
+  '57': [220, 100, 100],   // VPN UK — soft red
+  '58': [160, 160, 220],   // TOR — steel blue
+  '59': [220, 200, 100],   // VPN Singapore — gold
+  'infra': [255, 255, 255], // infrastructure — white
+};
+
+function vlanFromIP(ip) {
+  if (!ip) return '53';
+  const parts = ip.split('.');
+  if (parts.length >= 3) return parts[2];
+  return '53';
+}
+
+// ── Node class ────────────────────────────────────────────────────────
+class Node {
+  constructor(data) {
+    this.id = data.mac || data.name;
+    this.name = data.hostname || data.name || data.ip || '?';
+    this.ip = data.ip || '';
+    this.vlan = vlanFromIP(this.ip);
+    this.isInfra = data.is_infra || false;
+    this.tx = data.tx_bytes || 0;
+    this.rx = data.rx_bytes || 0;
+    this.prevTx = this.tx;
+    this.prevRx = this.rx;
+    this.activity = 0; // 0-1, derived from traffic delta
+    this.connections = data.connections || [];
+
+    const color = this.isInfra ? VLAN_COLORS.infra : (VLAN_COLORS[this.vlan] || VLAN_COLORS['53']);
+    this.color = color;
+
+    // Position — start random, will settle via physics
+    this.x = W * 0.2 + Math.random() * W * 0.6;
+    this.y = H * 0.2 + Math.random() * H * 0.6;
+    this.targetX = this.x;
+    this.targetY = this.y;
+    this.vx = 0;
+    this.vy = 0;
+
+    // Visual
+    const traffic = Math.log10(Math.max(this.tx + this.rx, 1));
+    this.baseRadius = this.isInfra ? 10 : Math.max(3, Math.min(7, traffic * 0.55));
+    this.radius = this.baseRadius;
+    this.pulsePhase = Math.random() * Math.PI * 2;
+    this.breathRate = 0.3 + Math.random() * 0.4; // individual rhythm
+    this.alpha = this.isInfra ? 0.95 : 0.75;
+  }
+
+  update(dt, nodes) {
+    // Breathing pulse
+    this.pulsePhase += dt * this.breathRate;
+    const breath = Math.sin(this.pulsePhase) * 0.15;
+    const activityPulse = this.activity * 0.3;
+    this.radius = this.baseRadius * (1 + breath + activityPulse);
+
+    // Activity decay
+    this.activity *= 0.97;
+
+    // Simple force-directed: repel from other nodes, attract to center
+    let fx = 0, fy = 0;
+
+    // Repulsion from other nodes
+    for (const other of nodes) {
+      if (other === this) continue;
+      const dx = this.x - other.x;
+      const dy = this.y - other.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const minDist = 90;
+      if (dist < minDist) {
+        const force = (minDist - dist) / minDist * 0.8;
+        fx += (dx / dist) * force;
+        fy += (dy / dist) * force;
+      }
+    }
+
+    // Gentle attraction to center of canvas
+    const cx = W / 2, cy = H / 2;
+    const dcx = cx - this.x, dcy = cy - this.y;
+    const distToCenter = Math.sqrt(dcx * dcx + dcy * dcy) || 1;
+    fx += (dcx / distToCenter) * 0.015;
+    fy += (dcy / distToCenter) * 0.015;
+
+    // VLAN clustering: attract to VLAN-mates, repel from other VLANs
+    for (const other of nodes) {
+      if (other === this) continue;
+      const dx = other.x - this.x;
+      const dy = other.y - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      if (other.vlan === this.vlan && !this.isInfra && !other.isInfra) {
+        // Attract same-VLAN peers
+        if (dist > 50 && dist < 250) {
+          fx += (dx / dist) * 0.012;
+          fy += (dy / dist) * 0.012;
+        }
+      } else if (other.vlan !== this.vlan && !this.isInfra && !other.isInfra) {
+        // Gently repel different-VLAN peers
+        if (dist < 200) {
+          fx -= (dx / dist) * 0.004;
+          fy -= (dy / dist) * 0.004;
+        }
+      }
+    }
+
+    // Apply forces with damping
+    this.vx = (this.vx + fx) * 0.92;
+    this.vy = (this.vy + fy) * 0.92;
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // Keep in bounds with soft margin
+    const margin = 60;
+    if (this.x < margin) this.vx += 0.1;
+    if (this.x > W - margin) this.vx -= 0.1;
+    if (this.y < margin) this.vy += 0.1;
+    if (this.y > H - margin) this.vy -= 0.1;
+  }
+
+  draw() {
+    const [r, g, b] = this.color;
+
+    // Outer glow
+    const glowRadius = this.radius * (4 + this.activity * 5);
+    const glow = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, glowRadius);
+    glow.addColorStop(0, `rgba(${r},${g},${b},${0.15 + this.activity * 0.2})`);
+    glow.addColorStop(0.5, `rgba(${r},${g},${b},${0.04 + this.activity * 0.06})`);
+    glow.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, glowRadius, 0, Math.PI * 2);
+    ctx.fillStyle = glow;
+    ctx.fill();
+
+    // Core
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${r},${g},${b},${this.alpha})`;
+    ctx.fill();
+
+    // Bright center
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius * 0.4, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${Math.min(255,r+80)},${Math.min(255,g+80)},${Math.min(255,b+80)},0.9)`;
+    ctx.fill();
+  }
+}
+
+// ── Pulse class — data traveling along fibers ─────────────────────────
+class Pulse {
+  constructor(from, to, color) {
+    this.from = from;
+    this.to = to;
+    this.t = 0;
+    this.speed = 0.005 + Math.random() * 0.01;
+    this.color = color;
+    this.size = 1.5 + Math.random() * 1.5;
+    this.alive = true;
+  }
+
+  update() {
+    this.t += this.speed;
+    if (this.t > 1) this.alive = false;
+  }
+
+  draw() {
+    const x = this.from.x + (this.to.x - this.from.x) * this.t;
+    const y = this.from.y + (this.to.y - this.from.y) * this.t;
+    const [r, g, b] = this.color;
+    const alpha = Math.sin(this.t * Math.PI) * 0.8;
+
+    ctx.beginPath();
+    ctx.arc(x, y, this.size, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+    ctx.fill();
+
+    // Trail
+    const trail = ctx.createRadialGradient(x, y, 0, x, y, this.size * 4);
+    trail.addColorStop(0, `rgba(${r},${g},${b},${alpha * 0.3})`);
+    trail.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.beginPath();
+    ctx.arc(x, y, this.size * 4, 0, Math.PI * 2);
+    ctx.fillStyle = trail;
+    ctx.fill();
+  }
+}
+
+// ── State ─────────────────────────────────────────────────────────────
+let nodes = [];
+let nodeMap = {};
+let pulses = [];
+let fibers = []; // [nodeA, nodeB] pairs
+let lastTime = performance.now();
+let dataLoaded = false;
+
+// ── Fetch network data ────────────────────────────────────────────────
+async function fetchData() {
+  try {
+    const resp = await fetch('/api/network');
+    const data = await resp.json();
+    updateNodes(data);
+    dataLoaded = true;
+  } catch (e) {
+    // Silently retry — the network breathes on
+    if (!dataLoaded) {
+      generateFallbackData();
+      dataLoaded = true;
+    }
+  }
+}
+
+function generateFallbackData() {
+  // If no API available, generate a simulated network
+  const simDevices = [
+    { name: 'Gateway', ip: '192.168.53.1', is_infra: true, tx_bytes: 7e13, rx_bytes: 7.2e13 },
+    { name: 'Switch', ip: '192.168.53.234', is_infra: true, tx_bytes: 4e13, rx_bytes: 4e13 },
+    { name: 'AP', ip: '192.168.53.113', is_infra: true, tx_bytes: 1e12, rx_bytes: 1e12 },
+    { name: 'NAS', ip: '192.168.53.73', mac: 'nas', tx_bytes: 4.49e14, rx_bytes: 1e13 },
+    { name: 'Alex-PcLinux', ip: '192.168.53.108', mac: 'apl', tx_bytes: 1.02e11, rx_bytes: 5e10 },
+    { name: 'Clawdbot', ip: '192.168.53.247', mac: 'cb', tx_bytes: 5e10, rx_bytes: 3e10 },
+    { name: 'HomeAssistant', ip: '192.168.53.246', mac: 'ha', tx_bytes: 1e9, rx_bytes: 1e9 },
+    { name: 'iPhone', ip: '192.168.53.27', mac: 'iph', tx_bytes: 4e9, rx_bytes: 8e9 },
+    { name: 'TV-98', ip: '192.168.55.44', mac: 'tv', tx_bytes: 4.3e9, rx_bytes: 1e9 },
+    { name: 'Plex', ip: '192.168.56.231', mac: 'plex', tx_bytes: 2e13, rx_bytes: 1e12 },
+    { name: 'PlexDL', ip: '192.168.56.244', mac: 'pdl', tx_bytes: 7.7e13, rx_bytes: 5e12 },
+    { name: 'Xbox', ip: '192.168.53.124', mac: 'xbox', tx_bytes: 1e10, rx_bytes: 5e10 },
+    { name: 'Nintendo', ip: '192.168.53.30', mac: 'nin', tx_bytes: 2e9, rx_bytes: 5e9 },
+    { name: 'Echo', ip: '192.168.53.109', mac: 'echo', tx_bytes: 5e8, rx_bytes: 1e9 },
+    { name: 'Yvette2', ip: '192.168.53.240', mac: 'yv2', tx_bytes: 1.2e13, rx_bytes: 5e12 },
+    { name: 'Printer', ip: '192.168.53.58', mac: 'prn', tx_bytes: 1e8, rx_bytes: 5e8 },
+  ];
+  updateNodes({ nodes: simDevices, fibers: [] });
+}
+
+function updateNodes(data) {
+  const incoming = data.nodes || [];
+  const newMap = {};
+
+  for (const d of incoming) {
+    const id = d.mac || d.name || d.ip;
+    if (nodeMap[id]) {
+      // Existing node — update traffic, compute activity
+      const existing = nodeMap[id];
+      const txDelta = Math.max(0, (d.tx_bytes || 0) - existing.tx);
+      const rxDelta = Math.max(0, (d.rx_bytes || 0) - existing.rx);
+      const totalDelta = txDelta + rxDelta;
+      existing.prevTx = existing.tx;
+      existing.prevRx = existing.rx;
+      existing.tx = d.tx_bytes || 0;
+      existing.rx = d.rx_bytes || 0;
+
+      // Activity spike based on traffic delta
+      if (totalDelta > 0) {
+        existing.activity = Math.min(1, Math.log10(totalDelta + 1) / 12);
+      }
+      newMap[id] = existing;
+    } else {
+      newMap[id] = new Node(d);
+    }
+  }
+
+  nodeMap = newMap;
+  nodes = Object.values(nodeMap);
+
+  // Build fibers: connect everything to infra nodes
+  fibers = [];
+  const infraNodes = nodes.filter(n => n.isInfra);
+  const clientNodes = nodes.filter(n => !n.isInfra);
+
+  // Clients connect to nearest infra node
+  for (const client of clientNodes) {
+    let nearest = infraNodes[0];
+    let minDist = Infinity;
+    for (const infra of infraNodes) {
+      const dx = client.x - infra.x;
+      const dy = client.y - infra.y;
+      const dist = dx * dx + dy * dy;
+      if (dist < minDist) { minDist = dist; nearest = infra; }
+    }
+    if (nearest) fibers.push([client, nearest]);
+  }
+
+  // Infra nodes connect to each other
+  for (let i = 0; i < infraNodes.length; i++) {
+    for (let j = i + 1; j < infraNodes.length; j++) {
+      fibers.push([infraNodes[i], infraNodes[j]]);
+    }
+  }
+
+  // Use data-provided fibers if available
+  if (data.fibers && data.fibers.length > 0) {
+    fibers = [];
+    for (const f of data.fibers) {
+      const a = nodeMap[f[0]], b = nodeMap[f[1]];
+      if (a && b) fibers.push([a, b]);
+    }
+  }
+}
+
+// ── Spawn pulses based on activity ────────────────────────────────────
+function spawnPulses() {
+  for (const node of nodes) {
+    if (node.activity > 0.05 && Math.random() < node.activity * 0.3) {
+      // Find a connected node to pulse toward
+      const connected = fibers
+        .filter(f => f[0] === node || f[1] === node)
+        .map(f => f[0] === node ? f[1] : f[0]);
+      if (connected.length > 0) {
+        const target = connected[Math.floor(Math.random() * connected.length)];
+        pulses.push(new Pulse(node, target, node.color));
+      }
+    }
+  }
+
+  // Ambient pulses — the network always has some life
+  if (fibers.length > 0 && Math.random() < 0.15) {
+    const fiber = fibers[Math.floor(Math.random() * fibers.length)];
+    const from = Math.random() < 0.5 ? fiber[0] : fiber[1];
+    const to = from === fiber[0] ? fiber[1] : fiber[0];
+    const color = from.color;
+    pulses.push(new Pulse(from, to, color));
+  }
+}
+
+// ── Draw fibers ───────────────────────────────────────────────────────
+function drawFibers() {
+  for (const [a, b] of fibers) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Fiber opacity based on proximity and activity
+    const avgActivity = (a.activity + b.activity) / 2;
+    const baseAlpha = 0.06 + avgActivity * 0.12;
+    const [r, g, b_] = a.isInfra ? b.color : a.color;
+
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = `rgba(${r},${g},${b_},${baseAlpha})`;
+    ctx.lineWidth = 0.6 + avgActivity * 2;
+    ctx.stroke();
+  }
+}
+
+// ── Background particles — ambient dust ───────────────────────────────
+const bgParticles = [];
+for (let i = 0; i < 80; i++) {
+  bgParticles.push({
+    x: Math.random() * 2000,
+    y: Math.random() * 2000,
+    vx: (Math.random() - 0.5) * 0.1,
+    vy: (Math.random() - 0.5) * 0.1,
+    size: 0.3 + Math.random() * 0.7,
+    alpha: 0.1 + Math.random() * 0.15,
+  });
+}
+
+function drawBackground(dt) {
+  for (const p of bgParticles) {
+    p.x += p.vx;
+    p.y += p.vy;
+    if (p.x < 0) p.x = W;
+    if (p.x > W) p.x = 0;
+    if (p.y < 0) p.y = H;
+    if (p.y > H) p.y = 0;
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(100,140,180,${p.alpha})`;
+    ctx.fill();
+  }
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────
+function frame(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+
+  // Fade — the dark breathes
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.fillRect(0, 0, W, H);
+
+  drawBackground(dt);
+
+  // Update
+  for (const node of nodes) node.update(dt, nodes);
+
+  // Draw fibers
+  drawFibers();
+
+  // Spawn and update pulses
+  spawnPulses();
+  for (const pulse of pulses) pulse.update();
+  pulses = pulses.filter(p => p.alive);
+  for (const pulse of pulses) pulse.draw();
+
+  // Draw nodes
+  for (const node of nodes) node.draw();
+
+  requestAnimationFrame(frame);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────
+fetchData();
+setInterval(fetchData, 15000);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
