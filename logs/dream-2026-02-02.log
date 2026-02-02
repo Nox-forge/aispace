@@ -1,0 +1,23 @@
+============================================================
+  Memory Dream — Coherence Report
+  2026-02-02 12:29:20
+  Total issues: 1
+============================================================
+
+── 1. Path Verification [CLEAN] ──
+  ✓ All checks passed
+
+── 2. Service Status [1 issue(s)] ──
+  ⚠ User service 'drift.service' not active (status: inactive)
+
+── 3. Tool Existence [CLEAN] ──
+  ✓ All checks passed
+
+── 4. Version Checks [CLEAN] ──
+  ✓ All checks passed
+
+── 5. Cross-Source Coherence [CLEAN] ──
+  ✓ All checks passed
+
+── 6. Stale Entities [CLEAN] ──
+  ✓ All checks passed
