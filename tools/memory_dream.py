@@ -597,14 +597,46 @@ def main():
 
     # Write log file
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log_file = LOG_DIR / f"dream-{datetime.now().strftime('%Y-%m-%d')}.log"
+    now = datetime.now()
+    date_str = now.strftime('%Y-%m-%d')
+    log_file = LOG_DIR / f"dream-{date_str}.log"
     log_file.write_text(full_report, encoding="utf-8")
     print(f"\nReport written to {log_file}")
+
+    # Write structured JSON companion file
+    total_issues = sum(len(v) for v in results.values())
+    categories_json = {}
+    for category, issues in results.items():
+        categories_json[category] = {
+            "status": "clean" if not issues else "issues",
+            "count": len(issues),
+            "issues": issues,
+        }
+    # Build human-readable summary
+    parts = []
+    for category, issues in results.items():
+        if issues:
+            short_name = category.split(". ", 1)[-1] if ". " in category else category
+            parts.append(f"{len(issues)} {short_name.lower()}")
+    summary = ", ".join(parts) if parts else "All coherent"
+
+    json_file = LOG_DIR / f"dream-{date_str}.json"
+    json_data = {
+        "date": date_str,
+        "timestamp": now.strftime('%Y-%m-%dT%H:%M:%S'),
+        "total_issues": total_issues,
+        "categories": categories_json,
+        "summary": summary,
+        "telegram_sent": not dry_run,
+    }
+    json_file.write_text(json.dumps(json_data, indent=2), encoding="utf-8")
+    print(f"JSON written to {json_file}")
 
     # Print report to stdout
     print(full_report)
 
     # Send Telegram
+    telegram_sent = False
     if dry_run:
         print("\n[DRY RUN] Would send to Telegram:")
         print(telegram_msg)
@@ -613,8 +645,13 @@ def main():
         out, rc = run_cmd(["send-telegram", telegram_msg])
         if rc == 0:
             print("Telegram sent OK")
+            telegram_sent = True
         else:
             print(f"Telegram send failed (rc={rc}): {out}", file=sys.stderr)
+
+    # Update JSON with actual telegram_sent status
+    json_data["telegram_sent"] = telegram_sent
+    json_file.write_text(json.dumps(json_data, indent=2), encoding="utf-8")
 
     total = sum(len(v) for v in results.values())
     print(f"\nDone. {total} issue(s) found.")

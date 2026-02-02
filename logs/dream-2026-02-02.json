@@ -1,0 +1,43 @@
+{
+  "date": "2026-02-02",
+  "timestamp": "2026-02-02T14:25:22",
+  "total_issues": 2,
+  "categories": {
+    "1. Path Verification": {
+      "status": "issues",
+      "count": 1,
+      "issues": [
+        "[MemoryDream] path does not exist: ~/aispace/logs/dream-YYYY-MM-DD.log"
+      ]
+    },
+    "2. Service Status": {
+      "status": "clean",
+      "count": 0,
+      "issues": []
+    },
+    "3. Tool Existence": {
+      "status": "clean",
+      "count": 0,
+      "issues": []
+    },
+    "4. Version Checks": {
+      "status": "clean",
+      "count": 0,
+      "issues": []
+    },
+    "5. Cross-Source Coherence": {
+      "status": "clean",
+      "count": 0,
+      "issues": []
+    },
+    "6. Stale Entities": {
+      "status": "issues",
+      "count": 1,
+      "issues": [
+        "[MemoryDream] has 1 dead path(s): ~/aispace/logs/dream-YYYY-MM-DD.log"
+      ]
+    }
+  },
+  "summary": "1 path verification, 1 stale entities",
+  "telegram_sent": false
+}
