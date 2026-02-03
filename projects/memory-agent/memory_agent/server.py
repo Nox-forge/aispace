@@ -127,6 +127,14 @@ class MemoryHandler(BaseHTTPRequestHandler):
                     "offset": offset,
                 })
 
+            elif path == "/memories/recent":
+                limit = int(params.get("limit", [10])[0])
+                memories = self.store.list_all(limit=limit, sort_by="created_at")
+                self._send_json({
+                    "memories": [_memory_to_dict(m) for m in memories],
+                    "count": len(memories),
+                })
+
             elif path.startswith("/memories/"):
                 try:
                     mid = int(path.split("/")[-1])
@@ -272,6 +280,19 @@ class MemoryHandler(BaseHTTPRequestHandler):
                     "memories_stored": len(stored_ids),
                     "text_length": len(text),
                     "pipeline_stats": self.pipeline.get_stats(),
+                })
+
+            elif path == "/listener/flush":
+                if not self.listener:
+                    self._send_error(503, "Listener not enabled")
+                    return
+
+                for session in list(self.listener.buffers.keys()):
+                    self.listener._flush_buffer(session, force=True)
+
+                self._send_json({
+                    "flushed": True,
+                    "stats": self.listener.get_stats(),
                 })
 
             else:
