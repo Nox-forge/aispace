@@ -11,6 +11,7 @@ Endpoints:
   POST /search             — semantic search (body: {"query": "...", "limit": 5})
   POST /store              — store a memory (body: {"content": "...", ...})
   POST /ingest             — ingest conversation chunk (runs extraction pipeline)
+  POST /ingest/conversation — ingest full conversation text (chunks + extracts)
   DELETE /memories/<id>    — delete a memory
 
 Run:
@@ -18,6 +19,7 @@ Run:
 """
 
 import json
+import logging
 import time
 import traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -26,6 +28,8 @@ from urllib.parse import urlparse, parse_qs
 
 from .store import MemoryStore, Memory, SearchResult
 from .extractor import ExtractionPipeline, PipelineConfig
+
+log = logging.getLogger("memory-agent")
 
 
 def _memory_to_dict(m: Memory) -> dict:
@@ -57,8 +61,8 @@ class MemoryHandler(BaseHTTPRequestHandler):
     pipeline: ExtractionPipeline = None
 
     def log_message(self, format, *args):
-        """Suppress default stderr logging."""
-        pass
+        """Route HTTP request logs through the logger."""
+        log.debug(format % args)
 
     def _send_json(self, data, status=200):
         self.send_response(status)
@@ -68,6 +72,7 @@ class MemoryHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
 
     def _send_error(self, status, message):
+        log.warning("HTTP %d: %s", status, message)
         self._send_json({"error": message}, status)
 
     def _read_body(self) -> dict:
@@ -100,6 +105,7 @@ class MemoryHandler(BaseHTTPRequestHandler):
                     "status": "ok" if ok else "degraded",
                     "ollama": ok,
                     "memories": self.store.count(),
+                    "pipeline": self.pipeline is not None,
                 })
 
             elif path == "/stats":
@@ -144,6 +150,7 @@ class MemoryHandler(BaseHTTPRequestHandler):
                 self._send_error(404, f"Unknown endpoint: {path}")
 
         except Exception as e:
+            log.error("GET %s failed: %s", path, e, exc_info=True)
             self._send_error(500, str(e))
 
     # --- POST ---
@@ -164,6 +171,7 @@ class MemoryHandler(BaseHTTPRequestHandler):
                 memory_type = body.get("memory_type")
                 min_importance = body.get("min_importance", 1)
 
+                start = time.time()
                 results = self.store.search(
                     query=query,
                     limit=limit,
@@ -171,6 +179,10 @@ class MemoryHandler(BaseHTTPRequestHandler):
                     memory_type=memory_type,
                     min_importance=min_importance,
                 )
+                elapsed = time.time() - start
+                log.info("search query=%r results=%d time=%.1fms",
+                         query[:50], len(results), elapsed * 1000)
+
                 self._send_json({
                     "query": query,
                     "results": [_result_to_dict(r) for r in results],
@@ -190,6 +202,7 @@ class MemoryHandler(BaseHTTPRequestHandler):
                     topic_tags=body.get("topic_tags", []),
                     source_session=body.get("source_session", ""),
                 )
+                log.info("stored memory #%d (%d chars)", mid, len(content))
                 self._send_json({"id": mid, "stored": True})
 
             elif path == "/ingest":
@@ -206,27 +219,50 @@ class MemoryHandler(BaseHTTPRequestHandler):
                 if session:
                     self.pipeline.config.source_session = session
 
+                start = time.time()
                 stored_ids = self.pipeline.process_chunk(chunk)
+                elapsed = time.time() - start
+                log.info("ingest chunk=%d chars stored=%d time=%.1fs",
+                         len(chunk), len(stored_ids), elapsed)
+
                 self._send_json({
                     "stored_ids": stored_ids,
                     "memories_stored": len(stored_ids),
                     "pipeline_stats": self.pipeline.get_stats(),
                 })
 
-            elif path == "/memories" and self.command == "POST":
-                # Alias for /store
-                content = body.get("content", "")
-                if not content:
-                    self._send_error(400, "Missing 'content' field")
+            elif path == "/ingest/conversation":
+                text = body.get("text", "") or body.get("conversation", "")
+                if not text:
+                    self._send_error(400, "Missing 'text' or 'conversation' field")
                     return
-                mid = self.store.store(
-                    content=content,
-                    importance=body.get("importance", 3),
-                    memory_type=body.get("memory_type", "general"),
-                    topic_tags=body.get("topic_tags", []),
-                    source_session=body.get("source_session", ""),
+
+                if not self.pipeline:
+                    self._send_error(503, "Extraction pipeline not initialized")
+                    return
+
+                session = body.get("session", "")
+                if session:
+                    self.pipeline.config.source_session = session
+
+                chunk_size = body.get("chunk_size", 1500)
+                overlap = body.get("overlap", 200)
+
+                start = time.time()
+                stored_ids = self.pipeline.process_conversation(
+                    text, chunk_size=chunk_size, overlap=overlap,
                 )
-                self._send_json({"id": mid, "stored": True})
+                elapsed = time.time() - start
+                log.info("ingest conversation=%d chars chunks=%d stored=%d time=%.1fs",
+                         len(text), self.pipeline.stats["chunks_processed"],
+                         len(stored_ids), elapsed)
+
+                self._send_json({
+                    "stored_ids": stored_ids,
+                    "memories_stored": len(stored_ids),
+                    "text_length": len(text),
+                    "pipeline_stats": self.pipeline.get_stats(),
+                })
 
             else:
                 self._send_error(404, f"Unknown endpoint: {path}")
@@ -234,7 +270,7 @@ class MemoryHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._send_error(400, "Invalid JSON body")
         except Exception as e:
-            traceback.print_exc()
+            log.error("POST %s failed: %s", path, e, exc_info=True)
             self._send_error(500, str(e))
 
     # --- DELETE ---
@@ -249,6 +285,7 @@ class MemoryHandler(BaseHTTPRequestHandler):
                     self._send_error(400, "Invalid memory ID")
                     return
                 if self.store.delete(mid):
+                    log.info("deleted memory #%d", mid)
                     self._send_json({"deleted": True, "id": mid})
                 else:
                     self._send_error(404, f"Memory {mid} not found")
@@ -256,6 +293,7 @@ class MemoryHandler(BaseHTTPRequestHandler):
                 self._send_error(404, f"Unknown endpoint: {path}")
 
         except Exception as e:
+            log.error("DELETE %s failed: %s", path, e, exc_info=True)
             self._send_error(500, str(e))
 
 
@@ -266,25 +304,37 @@ def run_server(
     pipeline_config: Optional[PipelineConfig] = None,
 ):
     """Start the memory agent HTTP server."""
+    # Set up logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
     store = store or MemoryStore()
 
     # Set up pipeline if config provided
     pipeline = None
     if pipeline_config:
         pipeline = ExtractionPipeline(store, pipeline_config)
+        log.info("Pipeline enabled: gate=%s/%s extract=%s/%s",
+                 pipeline_config.gate_backend,
+                 pipeline_config.gate_model or "default",
+                 pipeline_config.extract_backend,
+                 pipeline_config.extract_model or "default")
 
     # Inject store and pipeline into handler class
     MemoryHandler.store = store
     MemoryHandler.pipeline = pipeline
 
     server = HTTPServer((host, port), MemoryHandler)
-    print(f"Memory Agent server running on http://{host}:{port}")
-    print(f"  Memories: {store.count()}")
-    print(f"  Pipeline: {'enabled' if pipeline else 'disabled'}")
-    print(f"  Ollama: {'ok' if store.embedder.health_check() else 'unavailable'}")
+    log.info("Memory Agent server running on http://%s:%d", host, port)
+    log.info("  Memories: %d", store.count())
+    log.info("  Pipeline: %s", "enabled" if pipeline else "disabled")
+    log.info("  Ollama: %s", "ok" if store.embedder.health_check() else "unavailable")
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        log.info("Shutting down...")
         server.server_close()

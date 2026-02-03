@@ -376,7 +376,7 @@ class ExtractionPipeline:
         self.stats["chunks_passed_gate"] += 1
 
         # Step 2: Check for existing similar content (for dedup context)
-        existing = self.store.search(chunk[:500], limit=3, threshold=0.60)
+        existing = self.store.search(chunk[:500], limit=3, threshold=0.75)
         existing_context = ""
         if existing:
             existing_context = "\n".join(
