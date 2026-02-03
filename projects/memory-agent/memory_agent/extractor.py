@@ -389,6 +389,8 @@ class PipelineConfig:
     extract_backend: str = "local"
     extract_model: Optional[str] = None
     dedup_threshold: float = 0.85
+    link_threshold: float = 0.70  # similarity above this creates a "related_to" link
+    max_links: int = 3  # max auto-links per memory
     source_session: str = ""
 
 
@@ -405,6 +407,7 @@ class ExtractionPipeline:
             "memories_stored": 0,
             "memories_updated": 0,
             "memories_deduped": 0,
+            "links_created": 0,
         }
 
     def process_chunk(self, chunk: str) -> list[int]:
@@ -484,7 +487,45 @@ class ExtractionPipeline:
             result_ids.append(mid)
             self.stats["memories_stored"] += 1
 
+        # Step 5: Auto-link related memories
+        for mid in result_ids:
+            self._auto_link(mid)
+
         return result_ids
+
+    def _auto_link(self, memory_id: int):
+        """Create links between a memory and its most related existing memories.
+
+        Uses raw cosine similarity (not scored) to find genuinely related content.
+        """
+        memory = self.store.get(memory_id)
+        if not memory:
+            return
+
+        # Fetch more candidates than we need, then filter by raw similarity
+        candidates = self.store.search(
+            memory.content,
+            limit=self.config.max_links * 3,
+            threshold=0.40,  # low threshold to get candidates
+            exclude_ids={memory_id},
+        )
+
+        # Filter by raw similarity (not score, which includes recency/importance)
+        existing_links = self.store.get_links(memory_id)
+        existing_ids = {lid for lid, _ in existing_links}
+        linked = 0
+
+        for result in candidates:
+            if linked >= self.config.max_links:
+                break
+            if result.similarity < self.config.link_threshold:
+                continue
+            if result.memory.id in existing_ids:
+                continue
+
+            self.store.link(memory_id, result.memory.id, "related_to")
+            self.stats["links_created"] += 1
+            linked += 1
 
     def process_conversation(self, text: str, chunk_size: int = 1500,
                              overlap: int = 200) -> list[int]:
