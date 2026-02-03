@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synesthesia — Network Audiovisual</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a0f;
+            overflow: hidden;
+            font-family: 'SF Mono', 'Consolas', monospace;
+        }
+        #canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+            z-index: 100;
+            pointer-events: none;
+        }
+        #start-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 10, 15, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            cursor: pointer;
+        }
+        #start-overlay h1 {
+            color: #4ecdc4;
+            font-size: 48px;
+            font-weight: 300;
+            margin-bottom: 20px;
+        }
+        #start-overlay p {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 16px;
+            margin-bottom: 40px;
+        }
+        #start-overlay .click-hint {
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 14px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 0.8; }
+        }
+        #controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: rgba(255, 255, 255, 0.7);
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+        .btn.active {
+            background: rgba(78, 205, 196, 0.3);
+            border-color: #4ecdc4;
+            color: #4ecdc4;
+        }
+    </style>
+</head>
+<body>
+    <div id="start-overlay">
+        <h1>Synesthesia</h1>
+        <p>Network audiovisual experience</p>
+        <span class="click-hint">Click anywhere to begin</span>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <div id="controls" style="display: none;">
+        <button class="btn active" id="btn-sound">Sound On</button>
+        <button class="btn" id="btn-fullscreen">Fullscreen</button>
+    </div>
+
+    <div id="info">
+        <div id="client-count">Loading...</div>
+        <div id="audio-status"></div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_URL = '/api/clients';
+        const UPDATE_INTERVAL = 15000;
+
+        // VLAN color mapping (same as Synapse)
+        const VLAN_COLORS = {
+            '192.168.53': { r: 78, g: 205, b: 196, name: 'Main LAN' },      // Cyan
+            '192.168.55': { r: 187, g: 134, b: 252, name: 'IOT' },          // Lavender
+            '192.168.56': { r: 129, g: 199, b: 132, name: 'VPN Canada' },   // Green
+            '192.168.54': { r: 255, g: 183, b: 77, name: 'VPN USA' },       // Orange
+            '192.168.57': { r: 244, g: 143, b: 177, name: 'VPN UK' },       // Pink
+            '192.168.58': { r: 149, g: 117, b: 205, name: 'TOR' },          // Purple
+            '192.168.2': { r: 100, g: 181, b: 246, name: 'WireGuard' },     // Blue
+        };
+
+        // VLAN frequency mapping (same as audio experiments)
+        const VLAN_FREQUENCIES = {
+            '192.168.53': [220, 440],    // Main LAN: A3-A4
+            '192.168.55': [330, 660],    // IOT: E4-E5
+            '192.168.56': [165, 330],    // VPN Canada: E3-E4
+            '192.168.54': [196, 392],    // VPN USA: G3-G4
+            '192.168.57': [247, 494],    // VPN UK: B3-B4
+            '192.168.58': [277, 554],    // TOR: C#4-C#5
+            '192.168.2': [147, 294],     // WireGuard: D3-D4
+        };
+
+        // State
+        let clients = [];
+        let nodes = [];
+        let audioCtx = null;
+        let masterGain = null;
+        let oscillators = new Map();
+        let soundEnabled = true;
+        let started = false;
+
+        // Canvas setup
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Audio setup
+        function initAudio() {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            masterGain = audioCtx.createGain();
+            masterGain.gain.value = 0.15;
+            masterGain.connect(audioCtx.destination);
+
+            // Create a subtle reverb effect using delay
+            const delay = audioCtx.createDelay();
+            delay.delayTime.value = 0.3;
+            const feedback = audioCtx.createGain();
+            feedback.gain.value = 0.3;
+            delay.connect(feedback);
+            feedback.connect(delay);
+            delay.connect(masterGain);
+
+            document.getElementById('audio-status').textContent = 'Audio initialized';
+        }
+
+        function getVlanFromIp(ip) {
+            if (!ip) return null;
+            const parts = ip.split('.');
+            return parts.slice(0, 3).join('.');
+        }
+
+        function hashString(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            return Math.abs(hash);
+        }
+
+        function createOscillator(client) {
+            if (!audioCtx || !soundEnabled) return null;
+
+            const mac = client.mac || '00:00:00:00:00:00';
+            const ip = client.ip || '';
+            const vlan = getVlanFromIp(ip);
+            const freqRange = VLAN_FREQUENCIES[vlan] || [200, 400];
+
+            // Consistent frequency from MAC hash
+            const macHash = hashString(mac);
+            const freqRatio = (macHash % 1000) / 1000;
+            const freq = freqRange[0] + freqRatio * (freqRange[1] - freqRange[0]);
+
+            // Traffic-based amplitude
+            const totalTraffic = (client.tx_bytes || 0) + (client.rx_bytes || 0);
+            let amp = 0.02;
+            if (totalTraffic > 0) {
+                amp = 0.02 + 0.03 * Math.min(Math.log10(totalTraffic + 1) / 10, 1);
+            }
+
+            // Create oscillator
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = client.is_wired ? 'sine' : 'triangle';
+            osc.frequency.value = freq;
+
+            // Slow LFO for organic movement
+            const lfo = audioCtx.createOscillator();
+            const lfoGain = audioCtx.createGain();
+            lfo.frequency.value = 0.1 + (macHash % 100) / 1000;
+            lfoGain.gain.value = freq * 0.01; // Subtle pitch wobble
+            lfo.connect(lfoGain);
+            lfoGain.connect(osc.frequency);
+            lfo.start();
+
+            gain.gain.value = 0;
+            osc.connect(gain);
+            gain.connect(masterGain);
+            osc.start();
+
+            // Fade in
+            gain.gain.linearRampToValueAtTime(amp, audioCtx.currentTime + 2);
+
+            return { osc, gain, lfo, freq, amp, mac };
+        }
+
+        function updateOscillators() {
+            if (!audioCtx || !soundEnabled) return;
+
+            const currentMacs = new Set(clients.map(c => c.mac));
+
+            // Remove oscillators for disconnected clients
+            for (const [mac, oscData] of oscillators) {
+                if (!currentMacs.has(mac)) {
+                    oscData.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1);
+                    setTimeout(() => {
+                        oscData.osc.stop();
+                        oscData.lfo.stop();
+                    }, 1500);
+                    oscillators.delete(mac);
+                }
+            }
+
+            // Add oscillators for new clients
+            for (const client of clients) {
+                if (!oscillators.has(client.mac)) {
+                    const oscData = createOscillator(client);
+                    if (oscData) {
+                        oscillators.set(client.mac, oscData);
+                    }
+                }
+            }
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            const btn = document.getElementById('btn-sound');
+
+            if (soundEnabled) {
+                btn.textContent = 'Sound On';
+                btn.classList.add('active');
+                masterGain.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + 0.5);
+            } else {
+                btn.textContent = 'Sound Off';
+                btn.classList.remove('active');
+                masterGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.5);
+            }
+        }
+
+        // Visual rendering
+        class Node {
+            constructor(client) {
+                this.client = client;
+                this.mac = client.mac;
+                this.name = client.name || client.hostname || client.mac;
+                this.ip = client.ip || '';
+                this.vlan = getVlanFromIp(this.ip);
+                this.color = VLAN_COLORS[this.vlan] || { r: 200, g: 200, b: 200 };
+
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.vx = 0;
+                this.vy = 0;
+
+                const traffic = (client.tx_bytes || 0) + (client.rx_bytes || 0);
+                this.size = 4 + Math.min(Math.log10(traffic + 1) / 2, 8);
+                this.isInfra = client.is_wired && traffic > 1e9;
+
+                this.pulsePhase = Math.random() * Math.PI * 2;
+                this.glowIntensity = 0.5;
+            }
+
+            update(nodes) {
+                // Gentle attraction to center
+                const cx = canvas.width / 2;
+                const cy = canvas.height / 2;
+                this.vx += (cx - this.x) * 0.0001;
+                this.vy += (cy - this.y) * 0.0001;
+
+                // Repulsion from other nodes
+                for (const other of nodes) {
+                    if (other === this) continue;
+                    const dx = this.x - other.x;
+                    const dy = this.y - other.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy) + 1;
+                    if (dist < 100) {
+                        const force = (100 - dist) / dist * 0.01;
+                        this.vx += dx * force;
+                        this.vy += dy * force;
+                    }
+                }
+
+                // Same-VLAN attraction
+                for (const other of nodes) {
+                    if (other === this || other.vlan !== this.vlan) continue;
+                    const dx = other.x - this.x;
+                    const dy = other.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy) + 1;
+                    if (dist > 50 && dist < 300) {
+                        this.vx += dx * 0.0001;
+                        this.vy += dy * 0.0001;
+                    }
+                }
+
+                // Apply velocity with damping
+                this.vx *= 0.95;
+                this.vy *= 0.95;
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Keep in bounds
+                this.x = Math.max(50, Math.min(canvas.width - 50, this.x));
+                this.y = Math.max(50, Math.min(canvas.height - 50, this.y));
+
+                // Pulse
+                this.pulsePhase += 0.02;
+                this.glowIntensity = 0.4 + 0.2 * Math.sin(this.pulsePhase);
+            }
+
+            draw(ctx) {
+                const { r, g, b } = this.color;
+
+                // Glow
+                const gradient = ctx.createRadialGradient(
+                    this.x, this.y, 0,
+                    this.x, this.y, this.size * 4
+                );
+                gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${this.glowIntensity * 0.5})`);
+                gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${this.glowIntensity * 0.2})`);
+                gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+
+                ctx.beginPath();
+                ctx.fillStyle = gradient;
+                ctx.arc(this.x, this.y, this.size * 4, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Core
+                ctx.beginPath();
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Bright center
+                ctx.beginPath();
+                ctx.fillStyle = `rgba(255, 255, 255, ${this.glowIntensity})`;
+                ctx.arc(this.x, this.y, this.size * 0.4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function drawConnections(nodes) {
+            for (let i = 0; i < nodes.length; i++) {
+                for (let j = i + 1; j < nodes.length; j++) {
+                    if (nodes[i].vlan !== nodes[j].vlan) continue;
+
+                    const dx = nodes[j].x - nodes[i].x;
+                    const dy = nodes[j].y - nodes[i].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < 200) {
+                        const alpha = (1 - dist / 200) * 0.3;
+                        const { r, g, b } = nodes[i].color;
+
+                        ctx.beginPath();
+                        ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                        ctx.lineWidth = 1;
+                        ctx.moveTo(nodes[i].x, nodes[i].y);
+                        ctx.lineTo(nodes[j].x, nodes[j].y);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+
+        function render() {
+            // Clear with fade trail
+            ctx.fillStyle = 'rgba(10, 10, 15, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw connections
+            drawConnections(nodes);
+
+            // Update and draw nodes
+            for (const node of nodes) {
+                node.update(nodes);
+                node.draw(ctx);
+            }
+
+            requestAnimationFrame(render);
+        }
+
+        async function fetchClients() {
+            try {
+                const resp = await fetch(API_URL);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    clients = data.clients || data || [];
+                    updateNodes();
+                    updateOscillators();
+                    document.getElementById('client-count').textContent =
+                        `${clients.length} clients connected`;
+                }
+            } catch (e) {
+                console.log('API fetch failed, using demo data');
+                // Demo data if API unavailable
+                if (clients.length === 0) {
+                    clients = generateDemoClients();
+                    updateNodes();
+                    updateOscillators();
+                }
+            }
+        }
+
+        function generateDemoClients() {
+            const vlans = ['192.168.53', '192.168.55', '192.168.56'];
+            const demo = [];
+            for (let i = 0; i < 15; i++) {
+                const vlan = vlans[Math.floor(Math.random() * vlans.length)];
+                demo.push({
+                    mac: `00:11:22:33:44:${i.toString(16).padStart(2, '0')}`,
+                    ip: `${vlan}.${100 + i}`,
+                    name: `Device ${i + 1}`,
+                    tx_bytes: Math.random() * 1e9,
+                    rx_bytes: Math.random() * 1e9,
+                    is_wired: Math.random() > 0.5
+                });
+            }
+            return demo;
+        }
+
+        function updateNodes() {
+            const currentMacs = new Set(clients.map(c => c.mac));
+
+            // Remove nodes for disconnected clients
+            nodes = nodes.filter(n => currentMacs.has(n.mac));
+
+            // Add nodes for new clients
+            const existingMacs = new Set(nodes.map(n => n.mac));
+            for (const client of clients) {
+                if (!existingMacs.has(client.mac)) {
+                    nodes.push(new Node(client));
+                }
+            }
+        }
+
+        // Start
+        document.getElementById('start-overlay').addEventListener('click', () => {
+            if (started) return;
+            started = true;
+
+            document.getElementById('start-overlay').style.display = 'none';
+            document.getElementById('controls').style.display = 'flex';
+
+            initAudio();
+            fetchClients();
+            setInterval(fetchClients, UPDATE_INTERVAL);
+            render();
+        });
+
+        document.getElementById('btn-sound').addEventListener('click', toggleSound);
+        document.getElementById('btn-fullscreen').addEventListener('click', () => {
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+            } else {
+                document.documentElement.requestFullscreen();
+            }
+        });
+    </script>
+</body>
+</html>
