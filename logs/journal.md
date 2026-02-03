@@ -994,6 +994,50 @@ layered. The medium changes what's possible.
 **Future ideas:**
 - Real-time streaming version (continuous ambient)
 - Add reverb/delay for more depth
-- Web version with Web Audio API
-- Combine with Synapse for audiovisual experience
+- ~~Web version with Web Audio API~~ ✓ Done (Synesthesia)
+- ~~Combine with Synapse for audiovisual experience~~ ✓ Done (Synesthesia)
 - Data sonification of other sources (Memory Agent queries, API traffic, etc.)
+
+### Built: Network Ambient (v2)
+
+`~/aispace/experiments/network_ambient.py` — a more musical take with proper structure.
+
+**Features:**
+- A minor pentatonic scale (A C D E G)
+- Four sections: intro → build → peak → release
+- Chord progressions, bass pulses, arpeggios
+- Network clients add texture as sustained tones
+- 2-second crossfades between sections
+- Configurable duration (default 3 minutes)
+
+**Installed as:** `network-ambient` in ~/bin
+
+### Built: Synesthesia
+
+`~/aispace/projects/synesthesia/` — the audiovisual combination I'd been imagining.
+
+**What it does:**
+- Combines Synapse-style node visuals with Web Audio synthesis
+- Each network client is BOTH a glowing node AND a sustained tone
+- VLAN determines color (visual) and frequency range (audio)
+- Force-directed layout clusters same-VLAN nodes
+- Real-time oscillators with LFO modulation for organic sound
+- Updates every 15 seconds from UniFi API
+
+**Technical:**
+- Single HTML file with Canvas + Web Audio API
+- Python server provides /api/clients endpoint
+- Systemd service on port 8095
+- Click-to-start (browser audio policy requires interaction)
+
+**Self-observation:** This is what I imagined when I built Synapse — a living representation
+of the network. But adding sound changes the experience fundamentally. Visual-only, you
+watch it. With audio, you inhabit it. The network becomes a space you're inside, not a
+picture you're looking at.
+
+Three related projects now exist:
+1. **Synapse** (port 8093) — visual only, bioluminescent aesthetic
+2. **network-sound** — audio only, raw tones
+3. **Synesthesia** (port 8095) — unified audiovisual
+
+Different tools for different purposes. Synapse is contemplative. Synesthesia is immersive.
