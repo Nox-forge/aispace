@@ -219,6 +219,33 @@ class MemoryStore:
         conn.close()
         return memory_id
 
+    @staticmethod
+    def _compute_score(similarity: float, memory: Memory) -> float:
+        """Compute relevance score from similarity and memory metadata.
+
+        Factors:
+          - similarity: raw cosine similarity (dominant factor)
+          - importance: higher importance = slightly higher score
+          - recency: newer memories score higher (exponential decay)
+          - access: frequently accessed memories get a small boost
+        """
+        import math
+
+        # Importance factor: range 0.88 (imp=1) to 1.20 (imp=5)
+        importance_factor = 0.80 + (memory.importance * 0.08)
+
+        # Recency factor: exponential decay with ~120-day half-life
+        # range: ~0.5 (very old) to 1.0 (brand new)
+        now = time.time()
+        age_days = (now - memory.created_at) / 86400
+        recency_factor = 0.5 + 0.5 * math.exp(-age_days / 120)
+
+        # Access factor: small boost for frequently accessed memories
+        # range: 1.0 (never accessed) to ~1.15 (heavily accessed)
+        access_factor = 1.0 + min(0.15, math.log1p(memory.access_count) * 0.04)
+
+        return similarity * importance_factor * recency_factor * access_factor
+
     def search(
         self,
         query: str,
@@ -291,7 +318,6 @@ class MemoryStore:
         conn_for_update = conn  # Keep connection open for access count updates
 
         # Apply metadata filters and scoring
-        now = time.time()
         results = []
         for row in mem_rows:
             mem = self._row_to_memory(row)
@@ -306,11 +332,7 @@ class MemoryStore:
             # Convert cosine distance to similarity (distance 0 = identical)
             cosine_distance = distances.get(mem.id, 1.0)
             sim = 1.0 - cosine_distance
-
-            importance_weight = 0.85 + (mem.importance * 0.06)
-            age_days = (now - mem.created_at) / 86400
-            recency_weight = max(0.7, 1.0 - (age_days / 180) * 0.3)
-            score = sim * importance_weight * recency_weight
+            score = self._compute_score(sim, mem)
 
             if score >= threshold:
                 results.append(SearchResult(memory=mem, score=score, similarity=sim))
@@ -319,10 +341,11 @@ class MemoryStore:
 
         # Update access counts
         if results:
+            access_time = time.time()
             for r in results[:limit]:
                 conn_for_update.execute(
                     "UPDATE memories SET last_accessed = ?, access_count = access_count + 1 WHERE id = ?",
-                    (now, r.memory.id),
+                    (access_time, r.memory.id),
                 )
             conn_for_update.commit()
 
@@ -375,12 +398,9 @@ class MemoryStore:
 
         now = time.time()
         results = []
-        for i, (memory, sim) in enumerate(zip(memories, similarities)):
+        for memory, sim in zip(memories, similarities):
             sim = float(sim)
-            importance_weight = 0.85 + (memory.importance * 0.06)
-            age_days = (now - memory.created_at) / 86400
-            recency_weight = max(0.7, 1.0 - (age_days / 180) * 0.3)
-            score = sim * importance_weight * recency_weight
+            score = self._compute_score(sim, memory)
 
             if score >= threshold:
                 results.append(SearchResult(memory=memory, score=score, similarity=sim))
