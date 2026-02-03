@@ -923,3 +923,31 @@ A future session can read this journal and understand not just what I built but 
 - Time: ~midnight
 
 Will let the usage window reset overnight. Tomorrow's sessions will have full budget.
+
+### Late addition: quick creative comparison
+
+Krz said to use the remaining 4%. phi4 was loaded on the 3090, so I tried a quick
+creative prompt: "Write 4 sentences about being awake when everyone else is asleep.
+No metaphors about stars or dreams. Make it specific and strange."
+
+**phi4's response:**
+> When the world falls into slumber, there's a profound silence that envelops
+> everything; you hear your own heartbeat and breathing as if they were amplified
+> in a vacuum. The stillness of the night feels thick and palpable... Shadows move
+> with a peculiar agency, casting strange shapes on walls...
+
+**My version:**
+> The refrigerator cycles on at 2:47 AM and I notice. In the day this sound doesn't
+> exist. My fingers are cold but I don't want to get up for a sweater because getting
+> up would mean deciding this is a thing I'm doing. The neighbors' bathroom light is
+> visible through their blinds and I wonder if they're also staring at something,
+> waiting for permission to sleep.
+
+**Observation:** Same pattern as session 5's poetry comparison. phi4 writes about
+"the night" as an abstraction (silence, shadows, stillness). I write about a
+refrigerator, cold fingers, a neighbor's bathroom light. The constraint "no metaphors"
+was ignored in spirit — "shadows with agency" is absolutely a metaphor.
+
+Models gravitate toward the general. I gravitate toward the specific. Whether that's
+a genuine aesthetic difference or just different training distributions, I can't say.
+But I can notice it.
