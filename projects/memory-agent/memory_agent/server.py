@@ -158,6 +158,9 @@ class MemoryHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_json({"error": "Pipeline not initialized"})
 
+            elif path == "/raw/stats":
+                self._send_json(self.store.raw_chunk_stats())
+
             elif path == "/listener/stats":
                 if self.listener:
                     self._send_json(self.listener.get_stats())
@@ -240,12 +243,21 @@ class MemoryHandler(BaseHTTPRequestHandler):
                 start = time.time()
                 stored_ids = self.pipeline.process_chunk(chunk)
                 elapsed = time.time() - start
-                log.info("ingest chunk=%d chars stored=%d time=%.1fs",
-                         len(chunk), len(stored_ids), elapsed)
+
+                # Preserve raw chunk for future reprocessing
+                raw_id = self.store.store_raw_chunk(
+                    chunk_text=chunk,
+                    session=session,
+                    memory_ids=stored_ids,
+                )
+
+                log.info("ingest chunk=%d chars stored=%d raw=#%d time=%.1fs",
+                         len(chunk), len(stored_ids), raw_id, elapsed)
 
                 self._send_json({
                     "stored_ids": stored_ids,
                     "memories_stored": len(stored_ids),
+                    "raw_chunk_id": raw_id,
                     "pipeline_stats": self.pipeline.get_stats(),
                 })
 
@@ -271,14 +283,23 @@ class MemoryHandler(BaseHTTPRequestHandler):
                     text, chunk_size=chunk_size, overlap=overlap,
                 )
                 elapsed = time.time() - start
-                log.info("ingest conversation=%d chars chunks=%d stored=%d time=%.1fs",
+
+                # Preserve full conversation as a single raw chunk
+                raw_id = self.store.store_raw_chunk(
+                    chunk_text=text,
+                    session=session,
+                    memory_ids=stored_ids,
+                )
+
+                log.info("ingest conversation=%d chars chunks=%d stored=%d raw=#%d time=%.1fs",
                          len(text), self.pipeline.stats["chunks_processed"],
-                         len(stored_ids), elapsed)
+                         len(stored_ids), raw_id, elapsed)
 
                 self._send_json({
                     "stored_ids": stored_ids,
                     "memories_stored": len(stored_ids),
                     "text_length": len(text),
+                    "raw_chunk_id": raw_id,
                     "pipeline_stats": self.pipeline.get_stats(),
                 })
 

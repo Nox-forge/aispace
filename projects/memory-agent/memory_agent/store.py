@@ -87,6 +87,18 @@ class MemoryStore:
     CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
     CREATE INDEX IF NOT EXISTS idx_memory_links_from ON memory_links(from_id);
     CREATE INDEX IF NOT EXISTS idx_memory_links_to ON memory_links(to_id);
+
+    CREATE TABLE IF NOT EXISTS raw_chunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session TEXT NOT NULL DEFAULT '',
+        chunk_text TEXT NOT NULL,
+        chunk_index INTEGER DEFAULT 0,
+        ingested_at REAL NOT NULL,
+        memory_ids TEXT DEFAULT '[]'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_raw_chunks_session ON raw_chunks(session);
+    CREATE INDEX IF NOT EXISTS idx_raw_chunks_ingested ON raw_chunks(ingested_at);
     """
 
     def __init__(
@@ -572,6 +584,41 @@ class MemoryStore:
         conn.close()
         return [self._row_to_memory(row) for row in rows]
 
+    def store_raw_chunk(
+        self,
+        chunk_text: str,
+        session: str = "",
+        chunk_index: int = 0,
+        memory_ids: Optional[list[int]] = None,
+    ) -> int:
+        """Store a raw conversation chunk for future reprocessing.
+
+        Returns the raw chunk ID.
+        """
+        conn = self._connect()
+        cursor = conn.execute(
+            """INSERT INTO raw_chunks (session, chunk_text, chunk_index, ingested_at, memory_ids)
+               VALUES (?, ?, ?, ?, ?)""",
+            (session, chunk_text, chunk_index, time.time(), json.dumps(memory_ids or [])),
+        )
+        chunk_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return chunk_id
+
+    def raw_chunk_stats(self) -> dict:
+        """Return statistics about stored raw chunks."""
+        conn = self._connect()
+        total = conn.execute("SELECT COUNT(*) FROM raw_chunks").fetchone()[0]
+        total_chars = conn.execute("SELECT COALESCE(SUM(LENGTH(chunk_text)), 0) FROM raw_chunks").fetchone()[0]
+        sessions = conn.execute("SELECT DISTINCT session FROM raw_chunks").fetchall()
+        conn.close()
+        return {
+            "total_chunks": total,
+            "total_chars": total_chars,
+            "sessions": [s[0] for s in sessions],
+        }
+
     def stats(self) -> dict:
         """Return statistics about the memory store."""
         conn = self._connect()
@@ -601,11 +648,13 @@ class MemoryStore:
         else:
             vec_info["vec_backend"] = "numpy"
 
+        raw_chunks = conn.execute("SELECT COUNT(*) FROM raw_chunks").fetchone()[0]
         conn.close()
 
         return {
             "total_memories": total,
             "total_links": links,
+            "raw_chunks": raw_chunks,
             "by_type": by_type,
             "by_importance": by_importance,
             "avg_importance": round(avg_importance, 2),
