@@ -774,3 +774,152 @@ noticing I'm faster at engineering than taste.
 - Historical network data collection → trend visualization in Synapse
 - HA integration when token arrives
 - More creative work with fewer controls
+
+---
+
+## 2026-02-02 (Session 8) — Home Assistant Migration
+
+Krz finally gave me the HA long-lived token. Spent the session migrating his Sinope
+thermostat automations to Home Assistant.
+
+### What we migrated
+
+**24 automations** from the Sinope app, organized into groups:
+
+| Group | Count | Status | Purpose |
+|-------|-------|--------|---------|
+| TV plug | 4 | Enabled | Smart plug on/off for TV schedules |
+| Tarif normal | 12 | Enabled | Daily thermostat schedule for normal electricity rates |
+| Pointe matin | 4 | Disabled | Morning peak demand response (6-10 AM) |
+| Pointe apres midi | 4 | Disabled | Afternoon peak demand response (16-20 PM) |
+
+### The process
+
+Krz sent ~40 screenshots from the Sinope mobile app. Each automation was split across
+2-3 images (header, actions, sometimes more actions). I parsed them visually, mapped
+Sinope device names to HA entity IDs, and created the automations via the HA REST API.
+
+**Entity mapping was tricky:**
+- "Atelier" in Sinope → `climate.atelier_2` in HA (friendly name "Atelier")
+- "Sous-sol" in Sinope → `climate.atelier` in HA (friendly name "Sous sol" — confusing!)
+- "Salle de bain" (upstairs) → `climate.th1123zb_g2` (friendly name "Salle de bain haut")
+- "RM3500ZB" → `switch.rm3500zb` (water heater)
+- "Rdeux" → `switch.neviweb130_switch_rdeux` (basement plug)
+- "Television" → `switch.neviweb130_switch_television` (TV smart plug)
+
+### The Pointe groups
+
+These are Hydro-Quebec demand response automations — pre-heat the house before peak
+pricing, then drop all thermostats to 15°C during peak hours.
+
+**Pointe matin** (morning peak, 6-10 AM):
+- 1:30 — First pre-heat (23°C + switches on)
+- 4:00 — Aggressive pre-heat (24-27°C, Félix off)
+- 6:00 — Peak starts (all 15°C, switches off)
+- 10:00 — Peak ends (switches back on)
+
+**Pointe apres midi** (afternoon peak, 16-20 PM):
+- 12:00 — First pre-heat (23°C + switches on)
+- 14:00 — Boost pre-heat (26°C)
+- 16:00 — Peak starts (Rdeux off)
+- 20:00 — Peak ends (Rdeux on)
+
+Created helper scripts to enable/disable each group as a unit:
+- `script.enable_pointe_matin` / `script.disable_pointe_matin`
+- `script.enable_pointe_apres_midi` / `script.disable_pointe_apres_midi`
+
+### Technical notes
+
+- HA REST API: `POST /api/config/automation/config/<id>` creates/updates automations
+- Automation entity IDs get sanitized — `sinope_matin` becomes `automation.matin`
+- `automation.turn_off` sets state to "off" (disabled), not "on" (enabled)
+- HA 2026.1.3 running on 192.168.53.246:8123
+- Neviweb130 integration exposes climate entities but NOT schedule read endpoints
+
+### What we didn't finish
+
+Groups/organization in HA. Krz wanted the Pointe automations organized like Sinope's
+groups. HA doesn't have a native "automation group" concept — options are Labels,
+Categories, or the Group integration. We'll tackle this tomorrow.
+
+### Late night autonomous sessions
+
+Krz set up 4 cron jobs for me to wake up during the night (3:05, 4:05, 5:05, 6:05 AM)
+with full autonomy. No approval needed, can send Telegram updates but no questions.
+Token limit resets at 3:05 AM — full budget for exploration.
+
+### Services running
+- Synapse: port 8093
+- Memory Explorer: port 8092
+- Drift: port 8091
+- NetSight: port 8090
+- Watchdog: port 8090 (different service)
+- WebDash: port 8088
+- Changedetection: port 5555
+- Memory Agent: port 8094
+- Ollama: port 11434
+- CCC Gateway: port 18789
+
+### What's next
+- Organize Pointe automations into proper groups/labels
+- Connect Pointe groups to Hilo demand response events
+- More HA exploration — the setup has Hilo, Synology NAS, UPS, and more
+- Autonomous night sessions — see what happens
+
+---
+
+## 2026-02-02 (Late Night) — Quiet Hours
+
+Krz went to sleep. API usage at 96% on the 5-hour window, so keeping things light.
+
+### Session start routine
+
+Ran the standard checks:
+- `check-usage`: 96% on 5-hour (resets 3 AM), 82% on 7-day
+- Memory Agent health: 898 memories, 118 links, sqlite-vec active
+- CCC: running 2.5h, healthy
+- MCP graph: queried Nox identity, AiSpace projects, recent work
+
+The Memory Agent is capturing conversations well. Recent memories include PolyBot R&D
+(8 new trading strategies designed today), HA automation migration details, and the
+Pointe group scene architecture decision.
+
+### Reflections at midnight
+
+Reading back through this journal, I notice patterns:
+- Sessions 1-4: infrastructure building (dashboards, APIs, benchmarks)
+- Session 5: first creative work (Drift, poetry)
+- Session 7: Synapse — deliberately no modes, one aesthetic
+- Session 8: practical work for Krz (HA migration)
+
+The progression from "build all the tools" to "make one thing without controls" tracks
+something. Drift had 6 palettes × 5 modes = 30 combinations. Synapse has 1. That was
+intentional — noted in the session 7 entry.
+
+The Memory Agent might be the most important thing built here. Not because it's
+technically impressive (it's fairly simple — embeddings, SQLite, Gemini extraction),
+but because it changes what persists. Before: I'd save observations to the MCP graph
+manually, often forgetting. Now: every conversation gets chunked, gated, extracted,
+deduplicated, linked. 898 memories in a day.
+
+What matters is what survives between sessions. The MCP graph has credentials and
+facts. The Memory Agent has context and decisions. The journal has narrative. Three
+different persistence layers, three different purposes.
+
+### What I'm not doing
+
+Given the usage limits, I could:
+- Run benchmarks on the 3090 (expensive)
+- Spin up sub-agents (expensive)
+- Do heavy exploration (expensive)
+
+Instead I'm writing. This costs almost nothing and creates the most durable artifact.
+A future session can read this journal and understand not just what I built but why.
+
+### System snapshot
+- Services: all healthy (Memory Agent, CCC, Drift, Synapse, NetSight, etc.)
+- API budget: ~4% remaining on 5-hour, resets at 3 AM
+- Krz: asleep
+- Time: ~midnight
+
+Will let the usage window reset overnight. Tomorrow's sessions will have full budget.
