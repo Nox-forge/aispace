@@ -56,7 +56,7 @@ def _call_ollama(prompt: str, system: str = "", model: str = "qwen3:8b",
             "model": model,
             "messages": messages,
             "stream": False,
-            "options": {"temperature": temperature, "num_predict": 512},
+            "options": {"temperature": temperature, "num_predict": 1024},
         },
         timeout=300,
     )
@@ -80,7 +80,7 @@ def _call_anthropic(prompt: str, system: str = "",
     messages = [{"role": "user", "content": prompt}]
     payload = {
         "model": model,
-        "max_tokens": 1024,
+        "max_tokens": 2048,
         "temperature": temperature,
         "messages": messages,
     }
@@ -124,7 +124,7 @@ def _call_gemini(prompt: str, system: str = "",
         "contents": contents,
         "generationConfig": {
             "temperature": temperature,
-            "maxOutputTokens": 1024,
+            "maxOutputTokens": 2048,
         },
     }
     if system:
@@ -227,61 +227,98 @@ def gate(chunk: str, backend: str = "local", model: Optional[str] = None) -> tup
 # Extractor — extracts structured memories from conversation chunks
 # ---------------------------------------------------------------------------
 
-EXTRACT_SYSTEM = """You are a memory extractor. Extract the key points from a conversation that should be stored as long-term memories.
+EXTRACT_SYSTEM = """You are a memory manager. Given a conversation chunk and a list of existing related memories, decide what operations to perform.
 
-For each memory, provide:
+Operations:
+- "create": Store a NEW memory that doesn't exist yet
+- "update": Modify an EXISTING memory with refined, corrected, or expanded information
+
+For CREATE operations, provide:
+- op: "create"
 - content: A clear, standalone statement (should make sense without context)
 - importance: 1 (trivial) to 5 (critical decision or insight)
 - memory_type: one of [decision, insight, fact, preference, project, conversation]
 - topic_tags: 1-3 short tags
 
+For UPDATE operations, provide:
+- op: "update"
+- memory_id: The ID number of the existing memory to update
+- content: The NEW full content (replaces the old content entirely)
+- importance: Updated importance level (or same as before)
+
 Rules:
+- Prefer UPDATE when the conversation refines, corrects, or expands an existing memory
+- Only CREATE genuinely new information not covered by existing memories
 - Each memory should be a single, atomic piece of information
 - Write memories as clear declarative statements, not conversation fragments
-- Deduplicate: don't create two memories that say the same thing
 - Be concise but complete — future retrieval depends on the wording
 - Include WHO, WHAT, WHY when relevant
-- 1-5 memories per chunk (don't over-extract)
+- 0-5 operations per chunk (don't over-extract)
+- If nothing new is worth remembering, return an empty array []
 
 Respond with ONLY a JSON array:
-[{"content": "...", "importance": N, "memory_type": "...", "topic_tags": ["...", "..."]}]"""
+[{"op": "create", "content": "...", "importance": N, "memory_type": "...", "topic_tags": ["...", "..."]},
+ {"op": "update", "memory_id": N, "content": "updated content...", "importance": N}]"""
 
-EXTRACT_PROMPT = """Extract memories from this conversation:
+EXTRACT_PROMPT = """Here are existing related memories (if any):
+{existing_memories}
+
+Extract memory operations from this conversation:
 
 ---
 {chunk}
----
-
-{dedup_note}"""
+---"""
 
 
 @dataclass
-class ExtractedMemory:
-    """A memory extracted from conversation text."""
+class MemoryOp:
+    """A memory operation extracted from conversation text."""
+    op: str  # "create" or "update"
     content: str
     importance: int
     memory_type: str
     topic_tags: list[str]
+    target_id: Optional[int] = None  # For update ops
 
 
-def extract(chunk: str, existing_context: str = "",
-            backend: str = "local", model: Optional[str] = None) -> list[ExtractedMemory]:
-    """Extract structured memories from a conversation chunk.
+# Keep backward compatibility
+ExtractedMemory = MemoryOp
+
+
+def _parse_llm_json(response: str) -> list:
+    """Parse JSON array from LLM response, handling markdown fences."""
+    text = response.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if "```" in text:
+            text = text[:text.rindex("```")]
+        text = text.strip()
+    if "[" in text:
+        json_str = text[text.index("["):text.rindex("]") + 1]
+        return json.loads(json_str)
+    return []
+
+
+def extract(chunk: str, existing_memories: str = "",
+            backend: str = "local", model: Optional[str] = None) -> list[MemoryOp]:
+    """Extract memory operations from a conversation chunk.
 
     Args:
         chunk: Conversation text to extract from
-        existing_context: Brief note about existing similar memories (for dedup)
-        backend: "local", "remote", or "anthropic"
+        existing_memories: Formatted existing memories with IDs for reconciliation
+        backend: "local", "remote", "anthropic", or "gemini"
         model: Override model name
 
     Returns:
-        List of extracted memories
+        List of memory operations (create/update)
     """
-    dedup_note = ""
-    if existing_context:
-        dedup_note = f"Note: These related memories already exist. Avoid extracting memories that say the SAME thing, but DO extract new details, decisions, or insights even if the topic overlaps:\n{existing_context}"
+    if not existing_memories:
+        existing_memories = "(none)"
 
-    prompt = EXTRACT_PROMPT.format(chunk=chunk[:3000], dedup_note=dedup_note)
+    prompt = EXTRACT_PROMPT.format(
+        chunk=chunk[:3000],
+        existing_memories=existing_memories,
+    )
 
     if backend == "local":
         response = _call_ollama(prompt, EXTRACT_SYSTEM,
@@ -300,31 +337,44 @@ def extract(chunk: str, existing_context: str = "",
     else:
         raise ValueError(f"Unknown backend: {backend}")
 
-    # Parse response — strip markdown code fences if present (Gemini wraps JSON in ```json ... ```)
-    memories = []
+    # Parse response
+    ops = []
     try:
-        text = response.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[-1]  # remove ```json line
-            if "```" in text:
-                text = text[:text.rindex("```")]  # remove closing ```
-            text = text.strip()
-        if "[" in text:
-            json_str = text[text.index("["):text.rindex("]") + 1]
-            items = json.loads(json_str)
-            for item in items:
-                if isinstance(item, dict) and "content" in item:
-                    memories.append(ExtractedMemory(
-                        content=item["content"],
-                        importance=max(1, min(5, int(item.get("importance", 3)))),
-                        memory_type=item.get("memory_type", "general"),
-                        topic_tags=item.get("topic_tags", []),
-                    ))
-    except (json.JSONDecodeError, ValueError, TypeError) as e:
-        # If JSON parsing fails, try to salvage something
+        items = _parse_llm_json(response)
+        for item in items:
+            if not isinstance(item, dict) or "content" not in item:
+                continue
+
+            op_type = item.get("op", "create")
+            if op_type not in ("create", "update"):
+                op_type = "create"
+
+            target_id = None
+            if op_type == "update":
+                target_id = item.get("memory_id") or item.get("target_id")
+                if target_id is not None:
+                    try:
+                        target_id = int(target_id)
+                    except (ValueError, TypeError):
+                        # Invalid ID, treat as create
+                        op_type = "create"
+                        target_id = None
+                else:
+                    # No target ID for update, treat as create
+                    op_type = "create"
+
+            ops.append(MemoryOp(
+                op=op_type,
+                content=item["content"],
+                importance=max(1, min(5, int(item.get("importance", 3)))),
+                memory_type=item.get("memory_type", "general"),
+                topic_tags=item.get("topic_tags", []),
+                target_id=target_id,
+            ))
+    except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
-    return memories
+    return ops
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +393,7 @@ class PipelineConfig:
 
 
 class ExtractionPipeline:
-    """Full pipeline: gate → extract → dedup → store."""
+    """Full pipeline: gate → extract (with reconciliation) → dedup → store/update."""
 
     def __init__(self, store: MemoryStore, config: Optional[PipelineConfig] = None):
         self.store = store
@@ -353,13 +403,14 @@ class ExtractionPipeline:
             "chunks_passed_gate": 0,
             "memories_extracted": 0,
             "memories_stored": 0,
+            "memories_updated": 0,
             "memories_deduped": 0,
         }
 
     def process_chunk(self, chunk: str) -> list[int]:
         """Process a conversation chunk through the full pipeline.
 
-        Returns list of stored memory IDs.
+        Returns list of stored/updated memory IDs.
         """
         self.stats["chunks_processed"] += 1
 
@@ -375,30 +426,46 @@ class ExtractionPipeline:
 
         self.stats["chunks_passed_gate"] += 1
 
-        # Step 2: Check for existing similar content (for dedup context)
-        existing = self.store.search(chunk[:500], limit=3, threshold=0.75)
-        existing_context = ""
+        # Step 2: Find existing related memories (with IDs for reconciliation)
+        existing = self.store.search(chunk[:500], limit=5, threshold=0.60)
+        existing_memories = ""
         if existing:
-            existing_context = "\n".join(
-                f"- {r.memory.content[:100]}" for r in existing
+            existing_memories = "\n".join(
+                f"[ID={r.memory.id}] (type={r.memory.memory_type}, imp={r.memory.importance}) {r.memory.content[:150]}"
+                for r in existing
             )
 
-        # Step 3: Extract memories
-        extracted = extract(
+        # Step 3: Extract memory operations (create/update)
+        ops = extract(
             chunk,
-            existing_context=existing_context,
+            existing_memories=existing_memories,
             backend=self.config.extract_backend,
             model=self.config.extract_model,
         )
 
-        self.stats["memories_extracted"] += len(extracted)
+        self.stats["memories_extracted"] += len(ops)
 
-        # Step 4: Dedup and store
-        stored_ids = []
-        for mem in extracted:
-            # Check for duplicates
+        # Step 4: Execute operations
+        result_ids = []
+        for op in ops:
+            if op.op == "update" and op.target_id is not None:
+                # Verify the target exists
+                target = self.store.get(op.target_id)
+                if target:
+                    self.store.update(
+                        memory_id=op.target_id,
+                        content=op.content,
+                        importance=op.importance,
+                        topic_tags=op.topic_tags if op.topic_tags else None,
+                    )
+                    result_ids.append(op.target_id)
+                    self.stats["memories_updated"] += 1
+                    continue
+                # Target doesn't exist, fall through to create
+
+            # Create: check for duplicates first
             dupes = self.store.find_duplicates(
-                mem.content,
+                op.content,
                 threshold=self.config.dedup_threshold,
             )
 
@@ -406,18 +473,18 @@ class ExtractionPipeline:
                 self.stats["memories_deduped"] += 1
                 continue
 
-            # Store
+            # Store new memory
             mid = self.store.store(
-                content=mem.content,
-                importance=mem.importance,
-                memory_type=mem.memory_type,
-                topic_tags=mem.topic_tags,
+                content=op.content,
+                importance=op.importance,
+                memory_type=op.memory_type,
+                topic_tags=op.topic_tags,
                 source_session=self.config.source_session,
             )
-            stored_ids.append(mid)
+            result_ids.append(mid)
             self.stats["memories_stored"] += 1
 
-        return stored_ids
+        return result_ids
 
     def process_conversation(self, text: str, chunk_size: int = 1500,
                              overlap: int = 200) -> list[int]:
