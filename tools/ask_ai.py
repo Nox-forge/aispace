@@ -42,7 +42,7 @@ PROVIDERS = {
     "gemini": {
         "name": "Google Gemini",
         "url": "https://generativelanguage.googleapis.com/v1beta/models",
-        "default_model": "gemini-2.0-flash",
+        "default_model": "gemini-2.5-flash",
         "key_env": "GEMINI_API_KEY",
     },
     "local": {

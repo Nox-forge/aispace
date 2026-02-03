@@ -1,0 +1,60 @@
+{
+  "date": "2026-02-03",
+  "timestamp": "2026-02-03T05:00:05",
+  "total_issues": 16,
+  "categories": {
+    "1. Path Verification": {
+      "status": "issues",
+      "count": 1,
+      "issues": [
+        "[MemoryDream] path does not exist: ~/aispace/logs/dream-YYYY-MM-DD.log"
+      ]
+    },
+    "2. Service Status": {
+      "status": "issues",
+      "count": 2,
+      "issues": [
+        "Unlisted user service running: nox-cron.service",
+        "Unlisted user service running: synapse.service"
+      ]
+    },
+    "3. Tool Existence": {
+      "status": "issues",
+      "count": 11,
+      "issues": [
+        "npm global 'bird' not found in PATH",
+        "npm global 'oracle' not found in PATH",
+        "npm global 'summarize' not found in PATH",
+        "npm global 'clawdhub' not found in PATH",
+        "npm global 'mcporter' not found in PATH",
+        "npm global 'openclaw' not found in PATH",
+        "npm global 'afk' not found in PATH",
+        "New tool in ~/bin/ not listed in CLAUDE.md: ask-ai",
+        "New tool in ~/bin/ not listed in CLAUDE.md: memory-agent",
+        "New tool in ~/bin/ not listed in CLAUDE.md: polybot-strategy-lab",
+        "New tool in ~/bin/ not listed in CLAUDE.md: synapse"
+      ]
+    },
+    "4. Version Checks": {
+      "status": "issues",
+      "count": 1,
+      "issues": [
+        "Local Ollama models present but unlisted: nomic-embed-text:latest"
+      ]
+    },
+    "5. Cross-Source Coherence": {
+      "status": "clean",
+      "count": 0,
+      "issues": []
+    },
+    "6. Stale Entities": {
+      "status": "issues",
+      "count": 1,
+      "issues": [
+        "[MemoryDream] has 1 dead path(s): ~/aispace/logs/dream-YYYY-MM-DD.log"
+      ]
+    }
+  },
+  "summary": "1 path verification, 2 service status, 11 tool existence, 1 version checks, 1 stale entities",
+  "telegram_sent": false
+}

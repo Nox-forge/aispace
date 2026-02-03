@@ -1,1 +1,4 @@
 projects/memory-agent/memory_agent/__pycache__/
+__pycache__/
+*.pyc
+experiments/audio/*.wav

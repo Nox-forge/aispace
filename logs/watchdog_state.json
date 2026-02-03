@@ -1,54 +1,54 @@
 {
   "NAS DSM": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   },
   "NAS SMB": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   },
   "Home Assistant": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   },
   "Plex": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   },
   "Audiobookshelf": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   },
   "Radarr": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   },
   "Sonarr": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   },
   "Readarr": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   },
   "Prowlarr": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   },
   "Jellyfin": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   },
   "qBittorrent": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   },
   "Ombi": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   },
   "UniFi": {
     "up": true,
-    "last_check": "2026-02-01T20:44:37.533280"
+    "last_check": "2026-02-03T06:40:25.879274"
   }
 }

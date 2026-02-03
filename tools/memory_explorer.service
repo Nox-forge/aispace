@@ -1,0 +1,13 @@
+[Unit]
+Description=Memory Explorer - Claude's Knowledge Base Web UI
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/clawdbot/aispace/tools/memory_explorer.py
+Restart=on-failure
+RestartSec=5
+Environment=HOME=/home/clawdbot
+
+[Install]
+WantedBy=default.target

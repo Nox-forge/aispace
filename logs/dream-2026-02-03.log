@@ -1,0 +1,34 @@
+============================================================
+  Memory Dream — Coherence Report
+  2026-02-03 05:00:05
+  Total issues: 16
+============================================================
+
+── 1. Path Verification [1 issue(s)] ──
+  ⚠ [MemoryDream] path does not exist: ~/aispace/logs/dream-YYYY-MM-DD.log
+
+── 2. Service Status [2 issue(s)] ──
+  ⚠ Unlisted user service running: nox-cron.service
+  ⚠ Unlisted user service running: synapse.service
+
+── 3. Tool Existence [11 issue(s)] ──
+  ⚠ npm global 'bird' not found in PATH
+  ⚠ npm global 'oracle' not found in PATH
+  ⚠ npm global 'summarize' not found in PATH
+  ⚠ npm global 'clawdhub' not found in PATH
+  ⚠ npm global 'mcporter' not found in PATH
+  ⚠ npm global 'openclaw' not found in PATH
+  ⚠ npm global 'afk' not found in PATH
+  ⚠ New tool in ~/bin/ not listed in CLAUDE.md: ask-ai
+  ⚠ New tool in ~/bin/ not listed in CLAUDE.md: memory-agent
+  ⚠ New tool in ~/bin/ not listed in CLAUDE.md: polybot-strategy-lab
+  ⚠ New tool in ~/bin/ not listed in CLAUDE.md: synapse
+
+── 4. Version Checks [1 issue(s)] ──
+  ⚠ Local Ollama models present but unlisted: nomic-embed-text:latest
+
+── 5. Cross-Source Coherence [CLEAN] ──
+  ✓ All checks passed
+
+── 6. Stale Entities [1 issue(s)] ──
+  ⚠ [MemoryDream] has 1 dead path(s): ~/aispace/logs/dream-YYYY-MM-DD.log
