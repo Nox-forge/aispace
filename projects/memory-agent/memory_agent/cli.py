@@ -197,6 +197,27 @@ def cmd_import_mcp(store: MemoryStore, args):
         print(f"  Error importing MCP data: {e}")
 
 
+def cmd_serve(args):
+    """Start the HTTP API server."""
+    from .server import run_server
+    from .extractor import PipelineConfig
+
+    pipeline_config = None
+    if args.with_pipeline:
+        pipeline_config = PipelineConfig(
+            gate_backend=args.gate_backend,
+            gate_model=args.gate_model,
+            extract_backend=args.extract_backend,
+            extract_model=args.extract_model,
+        )
+
+    run_server(
+        host=args.host,
+        port=args.port,
+        pipeline_config=pipeline_config,
+    )
+
+
 def cmd_health(store: MemoryStore, args):
     """Check system health."""
     # Check Ollama
@@ -267,10 +288,25 @@ def main():
     # health
     sub.add_parser("health", help="Check system health")
 
+    # serve
+    p = sub.add_parser("serve", help="Start HTTP API server")
+    p.add_argument("--port", "-p", type=int, default=8094, help="Port (default: 8094)")
+    p.add_argument("--host", default="0.0.0.0", help="Host (default: 0.0.0.0)")
+    p.add_argument("--with-pipeline", action="store_true",
+                   help="Enable extraction pipeline for automatic memory capture")
+    p.add_argument("--gate-backend", default="gemini", help="Gate backend: local, remote, anthropic, gemini")
+    p.add_argument("--gate-model", default=None, help="Gate model override")
+    p.add_argument("--extract-backend", default="gemini", help="Extract backend: local, remote, anthropic, gemini")
+    p.add_argument("--extract-model", default=None, help="Extract model override")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
         sys.exit(1)
+
+    if args.command == "serve":
+        cmd_serve(args)
+        return
 
     store = MemoryStore()
 
