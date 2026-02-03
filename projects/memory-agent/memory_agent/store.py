@@ -1,6 +1,11 @@
-"""Semantic memory store backed by SQLite and vector embeddings."""
+"""Semantic memory store backed by SQLite and vector embeddings.
+
+Uses sqlite-vec for SIMD-accelerated vector search when available,
+falls back to numpy batch cosine similarity otherwise.
+"""
 
 import json
+import logging
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -13,6 +18,18 @@ from .embeddings import EmbeddingClient, batch_cosine_similarity
 
 # Default database location
 DEFAULT_DB_PATH = Path.home() / ".memory-agent" / "memories.db"
+
+log = logging.getLogger("memory-agent")
+
+# Try to load sqlite-vec
+try:
+    import sqlite_vec
+    HAS_SQLITE_VEC = True
+except ImportError:
+    HAS_SQLITE_VEC = False
+
+# nomic-embed-text produces 768-dimensional embeddings
+EMBEDDING_DIM = 768
 
 
 @dataclass
@@ -80,6 +97,7 @@ class MemoryStore:
         self.db_path = db_path or DEFAULT_DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.embedder = embedding_client or EmbeddingClient()
+        self.use_vec = HAS_SQLITE_VEC
         self._init_db()
 
     def _init_db(self):
@@ -87,12 +105,52 @@ class MemoryStore:
         conn = self._connect()
         conn.executescript(self.SCHEMA)
         conn.execute("PRAGMA journal_mode=WAL")
+
+        if self.use_vec:
+            try:
+                conn.execute(f"""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec
+                    USING vec0(embedding float[{EMBEDDING_DIM}] distance_metric=cosine)
+                """)
+                conn.commit()
+                # Sync vec table with any memories that aren't indexed yet
+                self._sync_vec_index(conn)
+            except Exception as e:
+                log.warning("sqlite-vec init failed, falling back to numpy: %s", e)
+                self.use_vec = False
+
         conn.commit()
         conn.close()
+
+    def _sync_vec_index(self, conn: sqlite3.Connection):
+        """Ensure all memories have entries in the vec0 table."""
+        # Find memories missing from vec index
+        missing = conn.execute("""
+            SELECT m.id, m.embedding FROM memories m
+            LEFT JOIN memory_vec v ON m.id = v.rowid
+            WHERE v.rowid IS NULL
+        """).fetchall()
+
+        if missing:
+            log.info("Syncing %d memories to sqlite-vec index...", len(missing))
+            for mem_id, embedding_blob in missing:
+                try:
+                    conn.execute(
+                        "INSERT INTO memory_vec(rowid, embedding) VALUES (?, ?)",
+                        (mem_id, embedding_blob),
+                    )
+                except Exception:
+                    pass  # Skip any that fail (e.g., wrong dimension)
+            conn.commit()
+            log.info("Vec index sync complete")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
         conn.execute("PRAGMA foreign_keys=ON")
+        if self.use_vec:
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
         return conn
 
     def _serialize_embedding(self, embedding: np.ndarray) -> bytes:
@@ -127,6 +185,7 @@ class MemoryStore:
         Returns the memory ID.
         """
         embedding = self.embedder.embed(content, prefix="search_document")
+        embedding_blob = self._serialize_embedding(embedding)
         now = time.time()
 
         conn = self._connect()
@@ -136,7 +195,7 @@ class MemoryStore:
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 content,
-                self._serialize_embedding(embedding),
+                embedding_blob,
                 max(1, min(5, importance)),
                 memory_type,
                 json.dumps(topic_tags or []),
@@ -145,6 +204,17 @@ class MemoryStore:
             ),
         )
         memory_id = cursor.lastrowid
+
+        # Also insert into vec index
+        if self.use_vec:
+            try:
+                conn.execute(
+                    "INSERT INTO memory_vec(rowid, embedding) VALUES (?, ?)",
+                    (memory_id, embedding_blob),
+                )
+            except Exception as e:
+                log.warning("Failed to insert into vec index: %s", e)
+
         conn.commit()
         conn.close()
         return memory_id
@@ -160,26 +230,119 @@ class MemoryStore:
     ) -> list[SearchResult]:
         """Search memories by semantic similarity.
 
-        Args:
-            query: Natural language search query
-            limit: Maximum results to return
-            threshold: Minimum combined relevance score (0-1)
-            memory_type: Filter by type (None = all types)
-            min_importance: Minimum importance level
-            exclude_ids: Set of memory IDs to skip
-
-        Returns:
-            List of SearchResult sorted by relevance score (descending)
+        Uses sqlite-vec SIMD KNN search when available, otherwise falls back
+        to numpy batch cosine similarity.
         """
         query_embedding = self.embedder.embed(query, prefix="search_query")
         exclude_ids = exclude_ids or set()
 
+        if self.use_vec:
+            return self._search_vec(
+                query_embedding, limit, threshold,
+                memory_type, min_importance, exclude_ids,
+            )
+        else:
+            return self._search_numpy(
+                query_embedding, limit, threshold,
+                memory_type, min_importance, exclude_ids,
+            )
+
+    def _search_vec(
+        self,
+        query_embedding: np.ndarray,
+        limit: int,
+        threshold: float,
+        memory_type: Optional[str],
+        min_importance: int,
+        exclude_ids: set[int],
+    ) -> list[SearchResult]:
+        """Search using sqlite-vec SIMD-accelerated KNN."""
+        conn = self._connect()
+        query_blob = self._serialize_embedding(query_embedding)
+
+        # Fetch more candidates than needed to account for metadata filtering
+        fetch_limit = max(limit * 5, 50)
+
+        # KNN search via vec0 virtual table
+        vec_rows = conn.execute(
+            """SELECT v.rowid, v.distance
+               FROM memory_vec v
+               WHERE v.embedding MATCH ?
+               ORDER BY v.distance
+               LIMIT ?""",
+            (query_blob, fetch_limit),
+        ).fetchall()
+
+        if not vec_rows:
+            conn.close()
+            return []
+
+        # Get memory metadata for candidates
+        candidate_ids = [row[0] for row in vec_rows]
+        distances = {row[0]: row[1] for row in vec_rows}
+
+        placeholders = ",".join("?" * len(candidate_ids))
+        mem_rows = conn.execute(
+            f"""SELECT id, content, importance, memory_type, topic_tags,
+                       source_session, created_at, last_accessed, access_count
+                FROM memories WHERE id IN ({placeholders})""",
+            candidate_ids,
+        ).fetchall()
+        conn_for_update = conn  # Keep connection open for access count updates
+
+        # Apply metadata filters and scoring
+        now = time.time()
+        results = []
+        for row in mem_rows:
+            mem = self._row_to_memory(row)
+
+            if mem.id in exclude_ids:
+                continue
+            if memory_type and mem.memory_type != memory_type:
+                continue
+            if mem.importance < min_importance:
+                continue
+
+            # Convert cosine distance to similarity (distance 0 = identical)
+            cosine_distance = distances.get(mem.id, 1.0)
+            sim = 1.0 - cosine_distance
+
+            importance_weight = 0.85 + (mem.importance * 0.06)
+            age_days = (now - mem.created_at) / 86400
+            recency_weight = max(0.7, 1.0 - (age_days / 180) * 0.3)
+            score = sim * importance_weight * recency_weight
+
+            if score >= threshold:
+                results.append(SearchResult(memory=mem, score=score, similarity=sim))
+
+        results.sort(key=lambda r: r.score, reverse=True)
+
+        # Update access counts
+        if results:
+            for r in results[:limit]:
+                conn_for_update.execute(
+                    "UPDATE memories SET last_accessed = ?, access_count = access_count + 1 WHERE id = ?",
+                    (now, r.memory.id),
+                )
+            conn_for_update.commit()
+
+        conn_for_update.close()
+        return results[:limit]
+
+    def _search_numpy(
+        self,
+        query_embedding: np.ndarray,
+        limit: int,
+        threshold: float,
+        memory_type: Optional[str],
+        min_importance: int,
+        exclude_ids: set[int],
+    ) -> list[SearchResult]:
+        """Fallback search using numpy batch cosine similarity."""
         conn = self._connect()
 
-        # Build query with optional filters
         where_clauses = ["importance >= ?"]
         params: list = [min_importance]
-
         if memory_type:
             where_clauses.append("memory_type = ?")
             params.append(memory_type)
@@ -196,7 +359,6 @@ class MemoryStore:
         if not rows:
             return []
 
-        # Extract embeddings and compute similarities in batch
         memories = []
         embeddings = []
         for row in rows:
@@ -211,29 +373,20 @@ class MemoryStore:
         embedding_matrix = np.array(embeddings)
         similarities = batch_cosine_similarity(query_embedding, embedding_matrix)
 
-        # Score with importance and recency weighting
-        # Importance is a gentle nudge (0.85 to 1.15), not a dominant factor.
-        # Semantic similarity should drive ranking; importance is a tiebreaker.
         now = time.time()
         results = []
         for i, (memory, sim) in enumerate(zip(memories, similarities)):
             sim = float(sim)
-            importance_weight = 0.85 + (memory.importance * 0.06)  # 0.91 to 1.15
+            importance_weight = 0.85 + (memory.importance * 0.06)
             age_days = (now - memory.created_at) / 86400
             recency_weight = max(0.7, 1.0 - (age_days / 180) * 0.3)
-
             score = sim * importance_weight * recency_weight
 
             if score >= threshold:
-                results.append(SearchResult(
-                    memory=memory,
-                    score=score,
-                    similarity=sim,
-                ))
+                results.append(SearchResult(memory=memory, score=score, similarity=sim))
 
         results.sort(key=lambda r: r.score, reverse=True)
 
-        # Update access counts for returned results
         if results:
             conn = self._connect()
             for r in results[:limit]:
@@ -266,6 +419,13 @@ class MemoryStore:
         conn = self._connect()
         cursor = conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
         deleted = cursor.rowcount > 0
+
+        if deleted and self.use_vec:
+            try:
+                conn.execute("DELETE FROM memory_vec WHERE rowid = ?", (memory_id,))
+            except Exception:
+                pass
+
         conn.commit()
         conn.close()
         return deleted
@@ -289,11 +449,13 @@ class MemoryStore:
 
         updates = []
         params = []
+        new_embedding_blob = None
 
         if content is not None and content != memory.content:
             embedding = self.embedder.embed(content, prefix="search_document")
+            new_embedding_blob = self._serialize_embedding(embedding)
             updates.extend(["content = ?", "embedding = ?"])
-            params.extend([content, self._serialize_embedding(embedding)])
+            params.extend([content, new_embedding_blob])
 
         if importance is not None:
             updates.append("importance = ?")
@@ -312,6 +474,18 @@ class MemoryStore:
             f"UPDATE memories SET {', '.join(updates)} WHERE id = ?",
             params,
         )
+
+        # Update vec index if embedding changed
+        if new_embedding_blob and self.use_vec:
+            try:
+                conn.execute("DELETE FROM memory_vec WHERE rowid = ?", (memory_id,))
+                conn.execute(
+                    "INSERT INTO memory_vec(rowid, embedding) VALUES (?, ?)",
+                    (memory_id, new_embedding_blob),
+                )
+            except Exception:
+                pass
+
         conn.commit()
         conn.close()
         return True
@@ -398,6 +572,15 @@ class MemoryStore:
             "SELECT MAX(created_at) FROM memories"
         ).fetchone()[0]
         links = conn.execute("SELECT COUNT(*) FROM memory_links").fetchone()[0]
+
+        vec_info = {}
+        if self.use_vec:
+            vec_count = conn.execute("SELECT COUNT(*) FROM memory_vec").fetchone()[0]
+            vec_info["vec_indexed"] = vec_count
+            vec_info["vec_backend"] = "sqlite-vec"
+        else:
+            vec_info["vec_backend"] = "numpy"
+
         conn.close()
 
         return {
@@ -408,4 +591,5 @@ class MemoryStore:
             "avg_importance": round(avg_importance, 2),
             "oldest": oldest,
             "newest": newest,
+            **vec_info,
         }
