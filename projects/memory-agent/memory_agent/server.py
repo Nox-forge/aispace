@@ -8,6 +8,8 @@ Endpoints:
   GET  /stats              — memory store statistics
   GET  /memories           — list memories (params: limit, offset, sort)
   GET  /memories/<id>      — get specific memory
+  GET  /pipeline/stats     — extraction pipeline statistics
+  GET  /listener/stats     — CCC listener statistics
   POST /search             — semantic search (body: {"query": "...", "limit": 5})
   POST /store              — store a memory (body: {"content": "...", ...})
   POST /ingest             — ingest conversation chunk (runs extraction pipeline)
@@ -15,7 +17,7 @@ Endpoints:
   DELETE /memories/<id>    — delete a memory
 
 Run:
-  memory-agent serve [--port 8094] [--host 0.0.0.0]
+  memory-agent serve [--port 8094] [--host 0.0.0.0] [--with-pipeline] [--ccc-listen]
 """
 
 import json
@@ -59,6 +61,7 @@ class MemoryHandler(BaseHTTPRequestHandler):
 
     store: MemoryStore = None
     pipeline: ExtractionPipeline = None
+    listener = None  # CCCListener, set by run_server
 
     def log_message(self, format, *args):
         """Route HTTP request logs through the logger."""
@@ -106,6 +109,7 @@ class MemoryHandler(BaseHTTPRequestHandler):
                     "ollama": ok,
                     "memories": self.store.count(),
                     "pipeline": self.pipeline is not None,
+                    "listener": self.listener is not None and self.listener._running,
                 })
 
             elif path == "/stats":
@@ -145,6 +149,12 @@ class MemoryHandler(BaseHTTPRequestHandler):
                     self._send_json(self.pipeline.get_stats())
                 else:
                     self._send_json({"error": "Pipeline not initialized"})
+
+            elif path == "/listener/stats":
+                if self.listener:
+                    self._send_json(self.listener.get_stats())
+                else:
+                    self._send_json({"enabled": False})
 
             else:
                 self._send_error(404, f"Unknown endpoint: {path}")
@@ -302,8 +312,19 @@ def run_server(
     port: int = 8094,
     store: Optional[MemoryStore] = None,
     pipeline_config: Optional[PipelineConfig] = None,
+    ccc_listen: bool = False,
+    ccc_poll_interval: int = 30,
 ):
-    """Start the memory agent HTTP server."""
+    """Start the memory agent HTTP server.
+
+    Args:
+        host: Bind address
+        port: Bind port
+        store: MemoryStore instance (created if not provided)
+        pipeline_config: Pipeline config (enables extraction pipeline)
+        ccc_listen: Enable CCC conversation listener
+        ccc_poll_interval: Seconds between CCC poll cycles
+    """
     # Set up logging
     logging.basicConfig(
         level=logging.INFO,
@@ -323,18 +344,38 @@ def run_server(
                  pipeline_config.extract_backend,
                  pipeline_config.extract_model or "default")
 
-    # Inject store and pipeline into handler class
+    # Set up CCC listener if requested
+    listener = None
+    if ccc_listen:
+        if not pipeline:
+            log.error("CCC listener requires --with-pipeline")
+        else:
+            try:
+                from .listener import CCCListener
+                listener = CCCListener(
+                    pipeline=pipeline,
+                    poll_interval=ccc_poll_interval,
+                )
+                listener.start()
+            except Exception as e:
+                log.error("Failed to start CCC listener: %s", e)
+
+    # Inject store, pipeline, and listener into handler class
     MemoryHandler.store = store
     MemoryHandler.pipeline = pipeline
+    MemoryHandler.listener = listener
 
     server = HTTPServer((host, port), MemoryHandler)
     log.info("Memory Agent server running on http://%s:%d", host, port)
     log.info("  Memories: %d", store.count())
     log.info("  Pipeline: %s", "enabled" if pipeline else "disabled")
+    log.info("  Listener: %s", "enabled" if listener else "disabled")
     log.info("  Ollama: %s", "ok" if store.embedder.health_check() else "unavailable")
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         log.info("Shutting down...")
+        if listener:
+            listener.stop()
         server.server_close()

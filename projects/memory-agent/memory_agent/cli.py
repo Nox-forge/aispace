@@ -215,6 +215,8 @@ def cmd_serve(args):
         host=args.host,
         port=args.port,
         pipeline_config=pipeline_config,
+        ccc_listen=args.ccc_listen,
+        ccc_poll_interval=args.ccc_poll_interval,
     )
 
 
@@ -298,6 +300,10 @@ def main():
     p.add_argument("--gate-model", default=None, help="Gate model override")
     p.add_argument("--extract-backend", default="gemini", help="Extract backend: local, remote, anthropic, gemini")
     p.add_argument("--extract-model", default=None, help="Extract model override")
+    p.add_argument("--ccc-listen", action="store_true",
+                   help="Enable CCC conversation listener for automatic memory capture")
+    p.add_argument("--ccc-poll-interval", type=int, default=30,
+                   help="CCC poll interval in seconds (default: 30)")
 
     args = parser.parse_args()
     if not args.command:
