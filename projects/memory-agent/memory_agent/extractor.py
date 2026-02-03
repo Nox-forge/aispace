@@ -70,7 +70,7 @@ def _call_ollama(prompt: str, system: str = "", model: str = "qwen3:8b",
 
 
 def _call_anthropic(prompt: str, system: str = "",
-                    model: str = "claude-haiku-3-20240307",
+                    model: str = "claude-haiku-4-20250414",
                     temperature: float = 0.3) -> str:
     """Call Anthropic API and return the response text."""
     api_key = _load_env_key("ANTHROPIC_API_KEY")
@@ -194,7 +194,7 @@ def gate(chunk: str, backend: str = "local", model: Optional[str] = None) -> tup
                                 base_url=REMOTE_OLLAMA)
     elif backend == "anthropic":
         response = _call_anthropic(prompt, GATE_SYSTEM,
-                                   model=model or "claude-haiku-3-20240307")
+                                   model=model or "claude-haiku-4-20250414")
     elif backend == "gemini":
         response = _call_gemini(prompt, GATE_SYSTEM,
                                 model=model or "gemini-2.5-flash")

@@ -298,7 +298,7 @@ def main():
                    help="Enable extraction pipeline for automatic memory capture")
     p.add_argument("--gate-backend", default="gemini", help="Gate backend: local, remote, anthropic, gemini")
     p.add_argument("--gate-model", default=None, help="Gate model override")
-    p.add_argument("--extract-backend", default="gemini", help="Extract backend: local, remote, anthropic, gemini")
+    p.add_argument("--extract-backend", default="anthropic", help="Extract backend: local, remote, anthropic, gemini")
     p.add_argument("--extract-model", default=None, help="Extract model override")
     p.add_argument("--ccc-listen", action="store_true",
                    help="Enable CCC conversation listener for automatic memory capture")
