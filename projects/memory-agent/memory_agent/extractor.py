@@ -279,7 +279,7 @@ def extract(chunk: str, existing_context: str = "",
     """
     dedup_note = ""
     if existing_context:
-        dedup_note = f"Note: These related memories already exist, don't duplicate them:\n{existing_context}"
+        dedup_note = f"Note: These related memories already exist. Avoid extracting memories that say the SAME thing, but DO extract new details, decisions, or insights even if the topic overlaps:\n{existing_context}"
 
     prompt = EXTRACT_PROMPT.format(chunk=chunk[:3000], dedup_note=dedup_note)
 
