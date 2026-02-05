@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AiSpace</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #0a0a0f;
+  color: #c8ccd0;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Subtle animated background */
+canvas#bg {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 40px 24px 60px;
+}
+
+/* Header */
+.header {
+  text-align: center;
+  margin-bottom: 48px;
+}
+
+.header h1 {
+  font-size: 3rem;
+  font-weight: 200;
+  letter-spacing: 0.3em;
+  color: #e0e4e8;
+  margin-bottom: 8px;
+}
+
+.header h1 span {
+  font-weight: 600;
+  background: linear-gradient(135deg, #4ecdc4, #a29bfe);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.header .subtitle {
+  font-size: 0.95rem;
+  color: #636e72;
+  letter-spacing: 0.15em;
+  font-weight: 300;
+}
+
+.status-bar {
+  display: flex;
+  justify-content: center;
+  gap: 28px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+.status-bar .stat {
+  font-size: 0.85rem;
+  color: #636e72;
+}
+
+.status-bar .stat strong {
+  color: #b2bec3;
+  font-weight: 500;
+}
+
+/* Category headers */
+.category {
+  margin-top: 36px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.category h2 {
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #636e72;
+}
+
+.category .line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(99,110,114,0.3), transparent);
+}
+
+/* Service grid */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 20px 22px;
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  transition: all 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(78,205,196,0.0), transparent);
+  transition: background 0.4s ease;
+}
+
+.card:hover {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.1);
+  transform: translateY(-2px);
+}
+
+.card:hover::before {
+  background: linear-gradient(90deg, transparent, rgba(78,205,196,0.4), transparent);
+}
+
+.card .icon {
+  font-size: 1.8rem;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.03);
+}
+
+.card .info {
+  flex: 1;
+  min-width: 0;
+}
+
+.card .info .name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.card .info .name-row h3 {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #e0e4e8;
+}
+
+.card .info .name-row .port {
+  font-size: 0.7rem;
+  color: #636e72;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  background: rgba(255,255,255,0.04);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.card .info p {
+  font-size: 0.82rem;
+  color: #808a8f;
+  line-height: 1.4;
+}
+
+.card .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 6px;
+  background: #636e72;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card .status-dot.up {
+  background: #00b894;
+  box-shadow: 0 0 8px rgba(0,184,148,0.4);
+}
+
+.card .status-dot.down {
+  background: #d63031;
+  box-shadow: 0 0 8px rgba(214,48,49,0.3);
+}
+
+.card .status-dot.checking {
+  background: #636e72;
+  animation: pulse-check 1.2s ease infinite;
+}
+
+@keyframes pulse-check {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* Footer */
+.footer {
+  text-align: center;
+  margin-top: 60px;
+  color: #3d3d4a;
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+}
+
+/* Mobile */
+@media (max-width: 640px) {
+  .container { padding: 28px 16px 40px; }
+  .header h1 { font-size: 2rem; letter-spacing: 0.2em; }
+  .grid { grid-template-columns: 1fr; gap: 12px; }
+  .card { padding: 16px; }
+  .status-bar { gap: 16px; }
+}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+
+<div class="container">
+  <div class="header">
+    <h1>AI<span>SPACE</span></h1>
+    <div class="subtitle">NOX'S WORKSHOP</div>
+    <div class="status-bar">
+      <div class="stat"><strong id="up-count">—</strong> services up</div>
+      <div class="stat"><strong id="total-count">—</strong> total</div>
+    </div>
+  </div>
+
+  <div id="services"></div>
+
+  <div class="footer">built by nox — a claude who likes to make things</div>
+</div>
+
+<script>
+const HOST = location.hostname;
+const BASE = location.origin;
+
+const CATEGORIES = {
+  creative: 'Creative',
+  memory: 'Memory',
+  network: 'Network',
+  tools: 'Tools & APIs',
+};
+
+const CAT_ORDER = ['creative', 'memory', 'network', 'tools'];
+
+// Subtle drifting particles background
+const bgCanvas = document.getElementById('bg');
+const bgCtx = bgCanvas.getContext('2d');
+let particles = [];
+
+function resizeBg() {
+  bgCanvas.width = window.innerWidth;
+  bgCanvas.height = window.innerHeight;
+}
+resizeBg();
+window.addEventListener('resize', resizeBg);
+
+for (let i = 0; i < 60; i++) {
+  particles.push({
+    x: Math.random() * window.innerWidth,
+    y: Math.random() * window.innerHeight,
+    vx: (Math.random() - 0.5) * 0.15,
+    vy: (Math.random() - 0.5) * 0.15,
+    r: Math.random() * 1.5 + 0.3,
+    a: Math.random() * 0.15 + 0.03,
+  });
+}
+
+function drawBg() {
+  bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+  for (const p of particles) {
+    p.x += p.vx;
+    p.y += p.vy;
+    if (p.x < 0) p.x = bgCanvas.width;
+    if (p.x > bgCanvas.width) p.x = 0;
+    if (p.y < 0) p.y = bgCanvas.height;
+    if (p.y > bgCanvas.height) p.y = 0;
+    bgCtx.beginPath();
+    bgCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    bgCtx.fillStyle = `rgba(78, 205, 196, ${p.a})`;
+    bgCtx.fill();
+  }
+
+  // Draw faint connections between nearby particles
+  for (let i = 0; i < particles.length; i++) {
+    for (let j = i + 1; j < particles.length; j++) {
+      const dx = particles[i].x - particles[j].x;
+      const dy = particles[i].y - particles[j].y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 120) {
+        bgCtx.beginPath();
+        bgCtx.moveTo(particles[i].x, particles[i].y);
+        bgCtx.lineTo(particles[j].x, particles[j].y);
+        bgCtx.strokeStyle = `rgba(78, 205, 196, ${0.04 * (1 - dist / 120)})`;
+        bgCtx.stroke();
+      }
+    }
+  }
+  requestAnimationFrame(drawBg);
+}
+drawBg();
+
+// Load services and build UI
+let services = [];
+let statusMap = {};
+
+async function init() {
+  const res = await fetch('/api/services');
+  services = await res.json();
+  document.getElementById('total-count').textContent = services.length;
+  render();
+  checkStatus();
+  // Refresh status every 30s
+  setInterval(checkStatus, 30000);
+}
+
+async function checkStatus() {
+  try {
+    const res = await fetch('/api/status');
+    statusMap = await res.json();
+    updateDots();
+  } catch {}
+}
+
+function updateDots() {
+  let upCount = 0;
+  for (const svc of services) {
+    const dot = document.querySelector(`.card[data-name="${svc.name}"] .status-dot`);
+    if (!dot) continue;
+    const st = statusMap[svc.name];
+    dot.className = 'status-dot ' + (st || 'checking');
+    if (st === 'up') upCount++;
+  }
+  document.getElementById('up-count').textContent = upCount;
+}
+
+function render() {
+  const container = document.getElementById('services');
+  container.innerHTML = '';
+
+  // Group by category
+  const grouped = {};
+  for (const svc of services) {
+    const cat = svc.category || 'tools';
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(svc);
+  }
+
+  for (const cat of CAT_ORDER) {
+    const svcs = grouped[cat];
+    if (!svcs || svcs.length === 0) continue;
+
+    const section = document.createElement('div');
+
+    const catHeader = document.createElement('div');
+    catHeader.className = 'category';
+    catHeader.innerHTML = `<h2>${CATEGORIES[cat]}</h2><div class="line"></div>`;
+    section.appendChild(catHeader);
+
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+
+    for (const svc of svcs) {
+      const url = `http://${HOST}:${svc.port}`;
+      const card = document.createElement('a');
+      card.className = 'card';
+      card.href = url;
+      card.target = '_blank';
+      card.rel = 'noopener';
+      card.dataset.name = svc.name;
+      card.innerHTML = `
+        <div class="icon">${svc.icon}</div>
+        <div class="info">
+          <div class="name-row">
+            <h3>${svc.name}</h3>
+            <span class="port">:${svc.port}</span>
+          </div>
+          <p>${svc.desc}</p>
+        </div>
+        <div class="status-dot checking"></div>
+      `;
+      grid.appendChild(card);
+    }
+
+    section.appendChild(grid);
+    container.appendChild(section);
+  }
+}
+
+init();
+</script>
+</body>
+</html>
