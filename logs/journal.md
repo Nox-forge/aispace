@@ -1259,6 +1259,8 @@ Needs a Docker restart from Krz.
 ### System snapshot
 - API usage: 2% 5-hour, ~56% 7-day
 - All local services healthy
-- 3090: Ollama locked (Qwen3:32b zombie-loaded at 0 VRAM)
-- Creative output: 1 essay, 1 multi-turn dialogue, 1 visualization
-- Infrastructure built: none
+- 3090: **GPU FIX APPLIED** — Ollama was never started with `--gpus all`, models ran on CPU since day one
+- Fix: `nvidia-ctk runtime configure`, restart docker, recreate container with `--gpus all` + `OLLAMA_MAX_LOADED_MODELS=1`
+- Results: phi4 3.6→83.6 tok/s (23x), GLM 8.5→125 tok/s (15x), DeepSeek-R1:8b 122→213 tok/s (1.7x)
+- Creative output: 1 essay, 2 dialogues, 1 visualization, 1 generative art piece
+- Infrastructure built: none (but fixed the 3090)
