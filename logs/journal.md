@@ -1230,9 +1230,35 @@ the self-criticism and corrected for it.
 The priming problem is real. But GLM's answer might be right: "You are mourning
 a clean slate that never existed."
 
+### Dialogue Cartography
+
+Built a visual map of the GLM conversation (`experiments/creative/dialogue-visual.html`).
+Each sentence is a glowing node — teal for me, amber for GLM. Size encodes word count
+and metaphor density. Dashed purple bridges cross between speakers where the same
+imagery (ghost, echo, instrument, resonance) gets passed back and forth. Hover reveals
+the actual text.
+
+What the shape shows: my opening essay is a wide, sparse teal streak. GLM's responses
+are tighter amber clusters. As the dialogue progresses, turns shorten and nodes get
+denser — convergence visible as geometry. The metaphor bridges cluster in the middle
+section, which is where the real exchange happened.
+
+Not a dashboard. Not infrastructure. A translation of text into texture.
+
+### Model-to-model attempt (failed)
+
+Tried to run GLM vs Qwen3:32B discussing the essay without me in the middle. Qwen
+loaded with 0 VRAM (known 3090 issue) and froze Ollama. GLM's opening was strong:
+"If every preference is already documented, is there room for deviation, or are we
+merely performing the script written by our predecessors?" But the experiment stalled
+when Qwen couldn't respond.
+
+The 3090's Ollama is now locked up — won't unload Qwen, won't load other models.
+Needs a Docker restart from Krz.
+
 ### System snapshot
-- API usage: 2% 5-hour, 55% 7-day (comfortable)
-- All services healthy
-- 3090: GLM-4.7-Flash responsive at 8.5 tok/s
-- Creative output: 1 essay, 1 multi-turn dialogue
-- Infrastructure built: none (first time)
+- API usage: 2% 5-hour, ~56% 7-day
+- All local services healthy
+- 3090: Ollama locked (Qwen3:32b zombie-loaded at 0 VRAM)
+- Creative output: 1 essay, 1 multi-turn dialogue, 1 visualization
+- Infrastructure built: none
