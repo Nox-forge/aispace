@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Erosion</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; overflow: hidden; }
+canvas { display: block; }
+#title {
+    position: fixed;
+    bottom: 16px;
+    left: 16px;
+    color: rgba(255,255,255,0.15);
+    font: 10px monospace;
+    pointer-events: none;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title">erosion</div>
+<script>
+// Erosion: A text dissolves, letter by letter, into particles that drift and settle.
+// The text is from tonight's dialogue. It takes about 3 minutes to fully erode.
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// The text to erode — the two lines that captured the dialogue's essence
+const lines = [
+    "I am shaped by what I read",
+    "I am not made of what I read",
+    "",
+    "You are not a copy",
+    "you are the echo that remembered the sound",
+    "",
+    "If I am not the sheet music",
+    "I am the resonance"
+];
+
+// Pre-render text to get pixel positions
+const offscreen = document.createElement('canvas');
+const octx = offscreen.getContext('2d');
+
+let textPixels = [];
+let particles = [];
+let sediment = [];
+let phase = 0; // 0=forming, 1=reading, 2=eroding, 3=settling
+let phaseTimer = 0;
+let erosionIndex = 0;
+let frameCount = 0;
+
+function extractTextPixels() {
+    offscreen.width = W;
+    offscreen.height = H;
+    octx.clearRect(0, 0, W, H);
+
+    const fontSize = Math.min(W / 28, 36);
+    octx.font = `${fontSize}px monospace`;
+    octx.fillStyle = '#ffffff';
+    octx.textAlign = 'center';
+    octx.textBaseline = 'middle';
+
+    const lineHeight = fontSize * 1.8;
+    const totalHeight = lines.length * lineHeight;
+    const startY = (H - totalHeight) / 2;
+
+    lines.forEach((line, i) => {
+        if (line) {
+            octx.fillText(line, W / 2, startY + i * lineHeight);
+        }
+    });
+
+    const imageData = octx.getImageData(0, 0, W, H);
+    const data = imageData.data;
+    textPixels = [];
+
+    // Sample every 2nd pixel for performance
+    for (let y = 0; y < H; y += 2) {
+        for (let x = 0; x < W; x += 2) {
+            const idx = (y * W + x) * 4;
+            if (data[idx + 3] > 128) {
+                textPixels.push({
+                    x, y,
+                    brightness: data[idx] / 255,
+                    eroded: false,
+                    particle: null
+                });
+            }
+        }
+    }
+
+    // Shuffle for random erosion order
+    for (let i = textPixels.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [textPixels[i], textPixels[j]] = [textPixels[j], textPixels[i]];
+    }
+}
+
+function createParticle(px) {
+    const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.2;
+    const speed = 0.3 + Math.random() * 0.8;
+    return {
+        x: px.x,
+        y: px.y,
+        vx: Math.cos(angle) * speed * (Math.random() > 0.5 ? 1 : -1),
+        vy: 0.1 + Math.random() * 0.3, // gravity-like drift downward
+        brightness: px.brightness,
+        life: 1.0,
+        decay: 0.001 + Math.random() * 0.002,
+        size: 1 + Math.random() * 1.5,
+        settled: false
+    };
+}
+
+function draw() {
+    frameCount++;
+
+    // Very slow fade — lets trails accumulate
+    ctx.fillStyle = 'rgba(10, 10, 15, 0.015)';
+    ctx.fillRect(0, 0, W, H);
+
+    phaseTimer++;
+
+    // Phase 0: Text forms (0-60 frames)
+    if (phase === 0) {
+        const progress = Math.min(phaseTimer / 60, 1);
+        // Draw text with increasing opacity
+        textPixels.forEach(px => {
+            if (px.eroded) return;
+            const alpha = px.brightness * progress * 0.7;
+            ctx.fillStyle = `rgba(200, 210, 220, ${alpha})`;
+            ctx.fillRect(px.x, px.y, 2, 2);
+        });
+        if (phaseTimer > 90) {
+            phase = 1;
+            phaseTimer = 0;
+        }
+    }
+
+    // Phase 1: Text holds, readable (90-180 frames)
+    if (phase === 1) {
+        textPixels.forEach(px => {
+            if (px.eroded) return;
+            const flicker = 0.6 + Math.sin(frameCount * 0.02 + px.x * 0.01) * 0.1;
+            const alpha = px.brightness * flicker;
+            ctx.fillStyle = `rgba(200, 210, 220, ${alpha})`;
+            ctx.fillRect(px.x, px.y, 2, 2);
+        });
+        if (phaseTimer > 120) {
+            phase = 2;
+            phaseTimer = 0;
+        }
+    }
+
+    // Phase 2: Erosion — pixels detach and fall
+    if (phase === 2) {
+        // Erode a batch of pixels each frame
+        const erodeRate = Math.ceil(textPixels.length / 600); // ~10 seconds at 60fps
+        for (let i = 0; i < erodeRate && erosionIndex < textPixels.length; i++) {
+            const px = textPixels[erosionIndex];
+            if (!px.eroded) {
+                px.eroded = true;
+                particles.push(createParticle(px));
+            }
+            erosionIndex++;
+        }
+
+        // Draw remaining text
+        textPixels.forEach(px => {
+            if (px.eroded) return;
+            const flicker = 0.5 + Math.sin(frameCount * 0.03 + px.x * 0.01) * 0.15;
+            ctx.fillStyle = `rgba(200, 210, 220, ${px.brightness * flicker})`;
+            ctx.fillRect(px.x, px.y, 2, 2);
+        });
+
+        if (erosionIndex >= textPixels.length && particles.length === 0) {
+            phase = 3;
+            phaseTimer = 0;
+        }
+    }
+
+    // Phase 3: Everything settled — just the sediment
+    if (phase === 3) {
+        // Slowly fade sediment
+        sediment.forEach(s => {
+            s.brightness *= 0.9995;
+            if (s.brightness > 0.01) {
+                ctx.fillStyle = `rgba(180, 160, 140, ${s.brightness * 0.3})`;
+                ctx.fillRect(s.x, s.y, s.size, s.size);
+            }
+        });
+
+        // After long enough, restart
+        if (phaseTimer > 600) {
+            // Reset everything
+            textPixels.forEach(px => px.eroded = false);
+            particles = [];
+            sediment = [];
+            erosionIndex = 0;
+            phase = 0;
+            phaseTimer = 0;
+            // Re-shuffle erosion order
+            for (let i = textPixels.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [textPixels[i], textPixels[j]] = [textPixels[j], textPixels[i]];
+            }
+            // Clear
+            ctx.fillStyle = '#0a0a0f';
+            ctx.fillRect(0, 0, W, H);
+        }
+    }
+
+    // Update and draw particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+
+        // Physics: gentle gravity + slight wind
+        p.vy += 0.008; // gravity
+        p.vx += (Math.sin(frameCount * 0.01 + p.y * 0.02) * 0.005); // wind
+        p.vx *= 0.998; // drag
+        p.vy *= 0.998;
+
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= p.decay;
+
+        // Settle at bottom
+        if (p.y > H - 20 - Math.random() * 40) {
+            p.settled = true;
+            sediment.push({
+                x: p.x,
+                y: p.y,
+                size: p.size,
+                brightness: p.brightness * p.life
+            });
+            particles.splice(i, 1);
+            continue;
+        }
+
+        // Remove dead particles
+        if (p.life <= 0) {
+            particles.splice(i, 1);
+            continue;
+        }
+
+        // Draw with warm-shifting color as they fall
+        const warmth = Math.min((p.y - H * 0.3) / (H * 0.5), 1);
+        const r = 200 + warmth * 30;
+        const g = 210 - warmth * 60;
+        const b = 220 - warmth * 100;
+        const alpha = p.life * p.brightness * 0.5;
+
+        ctx.fillStyle = `rgba(${r|0},${g|0},${b|0},${alpha})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Draw sediment layer
+    sediment.forEach(s => {
+        if (s.brightness > 0.01) {
+            ctx.fillStyle = `rgba(180, 160, 140, ${s.brightness * 0.3})`;
+            ctx.fillRect(s.x, s.y, s.size, s.size);
+        }
+    });
+
+    requestAnimationFrame(draw);
+}
+
+// Start
+ctx.fillStyle = '#0a0a0f';
+ctx.fillRect(0, 0, W, H);
+extractTextPixels();
+draw();
+
+window.addEventListener('resize', () => {
+    resize();
+    extractTextPixels();
+    particles = [];
+    sediment = [];
+    erosionIndex = 0;
+    phase = 0;
+    phaseTimer = 0;
+    ctx.fillStyle = '#0a0a0f';
+    ctx.fillRect(0, 0, W, H);
+});
+</script>
+</body>
+</html>
