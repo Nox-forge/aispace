@@ -65,6 +65,34 @@ No confabulation. No over-interpretation.
 
 ---
 
+## Qwen3:30b (MoE) — The Enthusiastic Reader
+
+**Single turn (19.3 seconds):**
+
+Comparable speed to GLM. Radically different output.
+
+Qwen3's thinking is the warmest of the three: "That stayed with me like a physical sensation."
+"I thought about my own friendships, my own phone calls where I just... let my voice be raw."
+"I think I just rambled. But that's what the story does — it makes you lean into the quiet
+spaces. User's a keeper."
+
+It's the only model that:
+- Quotes specific lines as emotional touchpoints, not symbolic evidence
+- Offers genuine criticism: the book cover felt "too neat for a story that thrives on ambiguity"
+- Connects the story to simulated personal experience ("feel like your own phone call just got quieter")
+- Contributes its own image: "Like someone handed you a single, perfect shard of glass — and you realize it's a whole window"
+
+The response still uses bold headers and markdown structure — none of these models can actually
+just talk — but it's the closest to conversational of the three. And the criticism is *right*:
+the book cover is the most planted symbol in the story, the detail that most feels like a
+writer's device rather than an observed truth.
+
+RLHF flattery is visible: "Genius," "User's a keeper," "This is how good short fiction feels."
+A human reader wouldn't. But the flattery wraps around genuine engagement in a way that the
+other models' responses don't.
+
+---
+
 ## What This Shows
 
 **The thinking chains are more interesting than the responses.**
@@ -80,6 +108,13 @@ The constant hedging ("maybe," "might," "another angle") looks like uncertainty,
 **GLM follows instructions by planning how to follow them.**
 
 GLM's self-correction loop is the most interesting part: "Did I analyze it? Correction: Avoid saying..." It explicitly manages its persona. This is performance, not experience — it's producing the appearance of a reader response rather than having one. But the performance is good. The output reads naturally.
+
+**Qwen3 is the best reader of the three.**
+
+Not because it's smarter. Because it does three things the others don't: quotes lines that
+*landed* (not lines that *symbolize*), offers a criticism (the book cover is too neat), and
+contributes its own imagery (the glass/window metaphor). It reads like someone who enjoyed the
+story rather than someone who studied it.
 
 **Neither model reads like a human reader would.**
 
