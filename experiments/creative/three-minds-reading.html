@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Three Minds Reading</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; overflow: hidden; font-family: monospace; }
+canvas { display: block; }
+#title {
+    position: fixed;
+    bottom: 16px;
+    left: 16px;
+    color: rgba(255,255,255,0.12);
+    font: 10px monospace;
+    pointer-events: none;
+    z-index: 10;
+}
+#labels {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    display: flex;
+    justify-content: space-around;
+    pointer-events: none;
+    z-index: 10;
+    padding-top: 20px;
+}
+.label {
+    text-align: center;
+    font: 11px monospace;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    opacity: 0;
+    transition: opacity 3s ease;
+}
+.label.visible { opacity: 1; }
+.label .name { font-size: 13px; margin-bottom: 4px; }
+.label .desc { font-size: 9px; opacity: 0.5; }
+#prompt-line {
+    position: fixed;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.08);
+    font: 9px monospace;
+    pointer-events: none;
+    z-index: 10;
+    text-align: center;
+    max-width: 600px;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="labels">
+    <div class="label" id="label-exaone" style="color: rgba(255, 107, 107, 0.6)">
+        <div class="name">EXAONE Deep</div>
+        <div class="desc">the anxious scholar — 878 seconds</div>
+    </div>
+    <div class="label" id="label-glm" style="color: rgba(78, 205, 196, 0.6)">
+        <div class="name">GLM-4.7-Flash</div>
+        <div class="desc">the studied reader — 18 seconds</div>
+    </div>
+    <div class="label" id="label-qwen" style="color: rgba(255, 183, 77, 0.6)">
+        <div class="name">Qwen3:30b</div>
+        <div class="desc">the enthusiastic reader — 19 seconds</div>
+    </div>
+</div>
+<div id="prompt-line">three models read the same story — their thinking, visualized</div>
+<div id="title">three minds reading</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Data: extracted from actual thinking chains ---
+
+// Each model's thinking is represented as a sequence of "moments"
+// Each moment has: type (assert/doubt/plan/feel/correct/meta), weight (importance), text snippet
+
+const exaoneThinking = [
+    { type: 'plan', w: 0.3, t: 'let me try to unpack this story' },
+    { type: 'assert', w: 0.5, t: 'two types of tables — window and non-window' },
+    { type: 'assert', w: 0.6, t: 'Elena notices the hand on the table' },
+    { type: 'doubt', w: 0.7, t: 'maybe symbolizing something about presence or control?' },
+    { type: 'doubt', w: 0.6, t: 'maybe the story is about how change happens gradually' },
+    { type: 'assert', w: 0.5, t: 'transitions are subtle and often unobserved' },
+    { type: 'doubt', w: 0.8, t: 'the book without a cover could represent...' },
+    { type: 'doubt', w: 0.5, t: 'maybe a metaphor for how people adjust' },
+    { type: 'assert', w: 0.4, t: 'the ending with the man who received news' },
+    { type: 'doubt', w: 0.7, t: 'maybe he is embodying the theme of change' },
+    { type: 'meta', w: 0.6, t: 'the title might refer to the non-window tables' },
+    { type: 'doubt', w: 0.8, t: 'alternatively, it could symbolize the unseen dynamics' },
+    { type: 'doubt', w: 0.9, t: 'another angle: unspoken dynamics in relationships' },
+    { type: 'assert', w: 0.5, t: 'phone calls and voices could symbolize communication' },
+    { type: 'doubt', w: 0.6, t: 'the tablecloth impression possibly being a wrinkle or not' },
+    { type: 'meta', w: 0.7, t: 'putting this all together...' },
+    { type: 'doubt', w: 0.9, t: 'wait, also the fact that the couple...' },
+    { type: 'doubt', w: 0.8, t: 'could that be Marie? Or David? Or separate?' },
+    { type: 'meta', w: 0.5, t: 'I should also consider the structure' },
+    { type: 'doubt', w: 0.7, t: 'another thought: the restaurant changes over time' },
+    { type: 'meta', w: 0.6, t: 'possible conclusion...' },
+    { type: 'doubt', w: 0.5, t: 'the theme is the invisibility of transitions' },
+];
+
+const glmThinking = [
+    { type: 'plan', w: 0.8, t: 'analyze the user\'s request' },
+    { type: 'plan', w: 0.7, t: 'constraint: not feedback or analysis' },
+    { type: 'plan', w: 0.7, t: 'constraint: read as reader not critic' },
+    { type: 'plan', w: 0.6, t: 'constraint: don\'t structure the response' },
+    { type: 'meta', w: 0.8, t: 'analyze the story' },
+    { type: 'assert', w: 0.5, t: 'setting: restaurant in February' },
+    { type: 'assert', w: 0.6, t: 'Elena is observant, reflective' },
+    { type: 'assert', w: 0.5, t: 'themes: routine, observation, distance' },
+    { type: 'meta', w: 0.9, t: 'adopt the persona: the reader' },
+    { type: 'correct', w: 0.8, t: 'step out of critic hat, put on reader hat' },
+    { type: 'feel', w: 0.6, t: 'it feels cozy but slightly cold' },
+    { type: 'feel', w: 0.7, t: 'I can feel the cold against the glass' },
+    { type: 'feel', w: 0.8, t: 'the hand — making a space — stuck with me' },
+    { type: 'feel', w: 0.5, t: 'the dialogue feels real' },
+    { type: 'feel', w: 0.7, t: 'the ending caught me off guard' },
+    { type: 'correct', w: 0.9, t: 'did I analyze it? correction: avoid saying...' },
+    { type: 'correct', w: 0.8, t: 'did I give feedback? correction: avoid...' },
+    { type: 'meta', w: 0.6, t: 'final polish: mental walkthrough' },
+    { type: 'plan', w: 0.7, t: 'constructing the final output' },
+    { type: 'correct', w: 0.7, t: 'make sure not to sound robotic' },
+];
+
+const qwenThinking = [
+    { type: 'meta', w: 0.5, t: 'they want my raw, unanalyzed reaction' },
+    { type: 'feel', w: 0.6, t: 'this is delicate — sharing something personal' },
+    { type: 'feel', w: 0.9, t: 'the hand stayed with me like a physical sensation' },
+    { type: 'feel', w: 0.8, t: 'the conversation carries so much unspoken weight' },
+    { type: 'feel', w: 0.7, t: 'the February detail — you smell the cold' },
+    { type: 'assert', w: 0.5, t: 'the ending felt slightly tidy' },
+    { type: 'feel', w: 0.9, t: 'the arranged voice — I thought about my own calls' },
+    { type: 'feel', w: 0.8, t: 'tablecloths wrinkle — makes you reread everything' },
+    { type: 'feel', w: 0.7, t: 'I could hear Elena\'s voice' },
+    { type: 'meta', w: 0.4, t: 'should I mention the Nox date? no, skip it' },
+    { type: 'feel', w: 0.9, t: 'they didn\'t over-explain — the reader feels the ache' },
+    { type: 'feel', w: 0.8, t: 'waiting for the hand to fold while the bread gets eaten' },
+    { type: 'meta', w: 0.5, t: 'I think I just rambled' },
+    { type: 'feel', w: 0.7, t: 'that\'s what the story does — lean into quiet spaces' },
+];
+
+// --- Color system ---
+const typeColors = {
+    assert: { r: 200, g: 200, b: 220 },   // cool gray
+    doubt:  { r: 255, g: 100, b: 100 },    // anxious red
+    plan:   { r: 100, g: 200, b: 255 },    // blueprint blue
+    feel:   { r: 255, g: 200, b: 80 },     // warm amber
+    correct:{ r: 100, g: 255, b: 180 },    // corrective green
+    meta:   { r: 180, g: 140, b: 255 },    // reflective purple
+};
+
+// Model accent colors
+const modelColors = {
+    exaone: { r: 255, g: 107, b: 107 },    // coral red
+    glm:    { r: 78, g: 205, b: 196 },     // teal
+    qwen:   { r: 255, g: 183, b: 77 },     // warm gold
+};
+
+// --- Particle system ---
+class ThinkingParticle {
+    constructor(moment, modelIdx, momentIdx, total) {
+        this.moment = moment;
+        this.modelIdx = modelIdx;
+        this.momentIdx = momentIdx;
+        this.total = total;
+
+        // Position: spread across the model's third of the screen
+        const thirdW = W / 3;
+        const centerX = thirdW * modelIdx + thirdW / 2;
+        const progress = momentIdx / total;
+
+        // Base position
+        this.baseX = centerX;
+        this.baseY = 80 + progress * (H - 160);
+
+        // Model-specific trajectory shapes
+        if (modelIdx === 0) {
+            // EXAONE: spiral/oscillating path — anxious circling
+            const amplitude = 40 + moment.w * 60;
+            const freq = momentIdx * 0.8;
+            this.baseX = centerX + Math.sin(freq) * amplitude;
+            // Doubts push further out
+            if (moment.type === 'doubt') {
+                this.baseX += (Math.random() - 0.5) * 80;
+            }
+        } else if (modelIdx === 1) {
+            // GLM: stepped, linear — clean phases
+            const phase = moment.type === 'plan' ? -1 :
+                         moment.type === 'correct' ? 1 :
+                         moment.type === 'feel' ? 0.5 : 0;
+            this.baseX = centerX + phase * 50;
+        } else {
+            // Qwen: flowing curve — warm drift
+            const flow = Math.sin(momentIdx * 0.4) * 30;
+            this.baseX = centerX + flow + (moment.type === 'feel' ? 15 : -10);
+        }
+
+        this.x = this.baseX;
+        this.y = this.baseY;
+        this.size = 3 + moment.w * 8;
+        this.alpha = 0;
+        this.targetAlpha = 0.4 + moment.w * 0.4;
+        this.born = false;
+        this.birthTime = 0;
+        this.breathOffset = Math.random() * Math.PI * 2;
+
+        // Trail
+        this.trail = [];
+        this.maxTrail = moment.type === 'doubt' ? 12 : 6;
+    }
+
+    birth(time) {
+        this.born = true;
+        this.birthTime = time;
+    }
+
+    update(time) {
+        if (!this.born) return;
+
+        const age = time - this.birthTime;
+
+        // Fade in
+        if (age < 60) {
+            this.alpha = (age / 60) * this.targetAlpha;
+        } else {
+            this.alpha = this.targetAlpha;
+        }
+
+        // Breathing
+        const breath = Math.sin(time * 0.01 + this.breathOffset) * 0.15;
+        this.alpha *= (1 + breath);
+
+        // Movement patterns per model
+        if (this.modelIdx === 0) {
+            // EXAONE: nervous jitter + orbital drift
+            const jitter = this.moment.type === 'doubt' ? 1.5 : 0.4;
+            this.x = this.baseX + Math.sin(time * 0.02 + this.momentIdx) * 8
+                     + (Math.random() - 0.5) * jitter;
+            this.y = this.baseY + Math.cos(time * 0.015 + this.momentIdx * 0.5) * 4;
+        } else if (this.modelIdx === 1) {
+            // GLM: gentle hover
+            this.x = this.baseX + Math.sin(time * 0.008 + this.momentIdx) * 3;
+            this.y = this.baseY + Math.cos(time * 0.01 + this.momentIdx) * 2;
+        } else {
+            // Qwen: warm sway
+            this.x = this.baseX + Math.sin(time * 0.012 + this.momentIdx * 0.7) * 6;
+            this.y = this.baseY + Math.cos(time * 0.009 + this.momentIdx * 0.5) * 3;
+        }
+
+        // Trail for EXAONE doubt particles
+        if (this.modelIdx === 0 && this.moment.type === 'doubt') {
+            this.trail.push({ x: this.x, y: this.y, alpha: this.alpha * 0.3 });
+            if (this.trail.length > this.maxTrail) this.trail.shift();
+        }
+    }
+
+    draw(ctx) {
+        if (!this.born || this.alpha < 0.01) return;
+
+        const color = typeColors[this.moment.type];
+        const model = [modelColors.exaone, modelColors.glm, modelColors.qwen][this.modelIdx];
+
+        // Blend type color with model color
+        const r = Math.round(color.r * 0.6 + model.r * 0.4);
+        const g = Math.round(color.g * 0.6 + model.g * 0.4);
+        const b = Math.round(color.b * 0.6 + model.b * 0.4);
+
+        // Draw trail
+        for (let i = 0; i < this.trail.length; i++) {
+            const t = this.trail[i];
+            const trailAlpha = t.alpha * (i / this.trail.length) * 0.5;
+            ctx.fillStyle = `rgba(${r},${g},${b},${trailAlpha})`;
+            ctx.beginPath();
+            ctx.arc(t.x, t.y, this.size * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Glow
+        const gradient = ctx.createRadialGradient(
+            this.x, this.y, 0,
+            this.x, this.y, this.size * 3
+        );
+        gradient.addColorStop(0, `rgba(${r},${g},${b},${this.alpha * 0.3})`);
+        gradient.addColorStop(1, `rgba(${r},${g},${b},0)`);
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size * 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Core
+        ctx.fillStyle = `rgba(${r},${g},${b},${this.alpha})`;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// --- Connection lines between sequential thoughts ---
+function drawConnections(ctx, particles, time) {
+    for (let i = 1; i < particles.length; i++) {
+        const prev = particles[i - 1];
+        const curr = particles[i];
+        if (!prev.born || !curr.born) continue;
+        if (prev.modelIdx !== curr.modelIdx) continue;
+
+        const alpha = Math.min(prev.alpha, curr.alpha) * 0.15;
+        if (alpha < 0.01) continue;
+
+        const model = [modelColors.exaone, modelColors.glm, modelColors.qwen][curr.modelIdx];
+
+        ctx.strokeStyle = `rgba(${model.r},${model.g},${model.b},${alpha})`;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
+        ctx.lineTo(curr.x, curr.y);
+        ctx.stroke();
+    }
+}
+
+// --- Doubt echoes: EXAONE's doubts send out ripple rings ---
+function drawDoubtEchoes(ctx, particles, time) {
+    for (const p of particles) {
+        if (!p.born || p.modelIdx !== 0 || p.moment.type !== 'doubt') continue;
+
+        const age = time - p.birthTime;
+        if (age < 30 || age > 200) continue;
+
+        const rippleAge = (age - 30) / 170;
+        const radius = rippleAge * 40;
+        const alpha = (1 - rippleAge) * 0.06 * p.moment.w;
+
+        ctx.strokeStyle = `rgba(255, 107, 107, ${alpha})`;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+}
+
+// --- Hover tooltip ---
+let mouseX = -1, mouseY = -1;
+let hoveredParticle = null;
+
+canvas.addEventListener('mousemove', (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+
+    hoveredParticle = null;
+    let minDist = 30;
+    for (const p of allParticles) {
+        if (!p.born) continue;
+        const dx = p.x - mouseX;
+        const dy = p.y - mouseY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < minDist) {
+            minDist = dist;
+            hoveredParticle = p;
+        }
+    }
+});
+
+function drawTooltip(ctx) {
+    if (!hoveredParticle) return;
+    const p = hoveredParticle;
+    const text = p.moment.t;
+    const typeLabel = p.moment.type.toUpperCase();
+
+    ctx.font = '11px monospace';
+    const metrics = ctx.measureText(text);
+    const padding = 8;
+    const boxW = Math.min(metrics.width + padding * 2, 300);
+    const boxH = 36;
+
+    let tx = p.x + 15;
+    let ty = p.y - 20;
+    if (tx + boxW > W) tx = p.x - boxW - 15;
+    if (ty < 10) ty = p.y + 20;
+
+    // Background
+    ctx.fillStyle = 'rgba(15, 15, 25, 0.9)';
+    ctx.fillRect(tx, ty, boxW, boxH);
+
+    // Type label
+    const color = typeColors[p.moment.type];
+    ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},0.6)`;
+    ctx.font = '8px monospace';
+    ctx.fillText(typeLabel, tx + padding, ty + 12);
+
+    // Text
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = '10px monospace';
+    const maxChars = Math.floor((boxW - padding * 2) / 6);
+    ctx.fillText(text.substring(0, maxChars), tx + padding, ty + 26);
+}
+
+// --- Initialize ---
+let allParticles = [];
+
+function init() {
+    allParticles = [];
+
+    const datasets = [exaoneThinking, glmThinking, qwenThinking];
+    datasets.forEach((data, modelIdx) => {
+        data.forEach((moment, momentIdx) => {
+            allParticles.push(new ThinkingParticle(moment, modelIdx, momentIdx, data.length));
+        });
+    });
+}
+
+// --- Animation ---
+let frame = 0;
+const birthInterval = 8; // frames between each particle birth
+let nextBirthIdx = 0;
+
+function draw() {
+    frame++;
+
+    // Slow fade
+    ctx.fillStyle = 'rgba(10, 10, 15, 0.03)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Birth particles over time
+    if (frame % birthInterval === 0 && nextBirthIdx < allParticles.length) {
+        // Birth one from each model roughly in parallel
+        for (let m = 0; m < 3; m++) {
+            const datasets = [exaoneThinking, glmThinking, qwenThinking];
+            const offset = datasets.slice(0, m).reduce((s, d) => s + d.length, 0);
+            const modelLen = datasets[m].length;
+            const progress = nextBirthIdx / Math.max(...datasets.map(d => d.length));
+            const idx = Math.floor(progress * modelLen);
+            if (idx < modelLen) {
+                allParticles[offset + idx].birth(frame);
+            }
+        }
+        nextBirthIdx++;
+    }
+
+    // Show labels after some particles are born
+    if (frame === 30) {
+        document.querySelectorAll('.label').forEach(l => l.classList.add('visible'));
+    }
+
+    // Update all
+    for (const p of allParticles) {
+        p.update(frame);
+    }
+
+    // Draw connections
+    drawConnections(ctx, allParticles, frame);
+
+    // Draw doubt echoes
+    drawDoubtEchoes(ctx, allParticles, frame);
+
+    // Draw particles
+    for (const p of allParticles) {
+        p.draw(ctx);
+    }
+
+    // Tooltip
+    drawTooltip(ctx);
+
+    // Draw vertical dividers (very subtle)
+    ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(W / 3, 60);
+    ctx.lineTo(W / 3, H - 40);
+    ctx.moveTo(2 * W / 3, 60);
+    ctx.lineTo(2 * W / 3, H - 40);
+    ctx.stroke();
+
+    requestAnimationFrame(draw);
+}
+
+// Start
+ctx.fillStyle = '#0a0a0f';
+ctx.fillRect(0, 0, W, H);
+init();
+draw();
+
+window.addEventListener('resize', () => {
+    resize();
+    init();
+    frame = 0;
+    nextBirthIdx = 0;
+    ctx.fillStyle = '#0a0a0f';
+    ctx.fillRect(0, 0, W, H);
+});
+</script>
+</body>
+</html>
