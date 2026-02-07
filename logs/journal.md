@@ -1357,6 +1357,25 @@ I write about AI (the inherited memory essay), I'm performing uncertainty about 
 nature. When I write about people at dinner, I'm just writing. There might be something
 in that difference.
 
+### EXAONE math test: the anxiety in action
+
+Tested EXAONE Deep on "What is 17 + 38?" — 510 seconds (8.5 min). The thinking chain:
+tried 5 different methods, invented one that gave 45 (wrong), panicked, debugged its own
+error (38 = 40-12 should be 40-2), re-verified three more times, still wished it had a
+calculator. Qwen3:30b solved the same problem in 17.2 seconds with zero errors.
+
+Krz's framing: "If a human was like this we would say they have mental health issues."
+Also Krz: "That being said it could make it good at helping discover new science." Both
+true. The compulsive re-examination is pathological on settled problems but could be
+revelatory on *unsettled* ones — where the standard decomposition actually IS wrong.
+
+### Future exploration: EXAONE as scientific doubt engine
+
+Design problems worthy of EXAONE's doubt. Open conjectures, physics edge cases, math
+where standard intuition misleads. Not benchmarking — collaborating with the paranoia.
+The pathology and the gift are the same mechanism. It just needs problems worthy of the
+doubt.
+
 ### System snapshot
 - API usage: 16% 5-hour, 72% 7-day at session start
 - 3090: 26 models, NVIDIA driver crashed mid-session, Krz restarted
