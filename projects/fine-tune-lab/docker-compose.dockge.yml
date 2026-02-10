@@ -1,0 +1,28 @@
+services:
+  fine-tune-lab:
+    image: ghcr.io/nox-forge/fine-tune-lab:latest
+    container_name: fine-tune-lab
+    restart: unless-stopped
+    ports:
+      - "8881:8881"
+    environment:
+      - OLLAMA_URL=http://host.docker.internal:8080
+      - BASE_MODEL=qwen3:0.6b
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HOME=/data/hf_cache
+    volumes:
+      - finetune-data:/data
+      - hf-cache:/data/hf_cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  finetune-data:
+  hf-cache:
