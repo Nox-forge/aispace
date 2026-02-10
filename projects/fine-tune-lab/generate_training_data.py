@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+"""Generate training data for networking fine-tuning.
+
+Mix of general networking knowledge + Krz's specific UniFi network topology.
+Output: training_data.json in HuggingFace chat format.
+"""
+
+import json
+
+def qa(q: str, a: str) -> dict:
+    return {"messages": [{"role": "user", "content": q}, {"role": "assistant", "content": a}]}
+
+data = [
+    # === VLAN BASICS ===
+    qa("What is a VLAN and why should I use one?",
+       "A VLAN (Virtual Local Area Network) logically segments a physical network into isolated broadcast domains. Use VLANs to separate traffic types (IoT, media, guests) for security and performance. Devices on different VLANs can't communicate without a router or firewall rule allowing it."),
+
+    qa("What VLAN should I put IoT devices on?",
+       "IoT devices should be on a dedicated VLAN isolated from your main LAN. This prevents compromised smart devices from accessing your computers and NAS. Create a separate SSID (like 'CheerioIOT') mapped to the IoT VLAN, and use firewall rules to block IoT-to-LAN traffic while allowing internet access."),
+
+    qa("How do I create a VLAN in UniFi?",
+       "In the UniFi controller, go to Settings > Networks > Create New Network. Set the purpose to 'Corporate', assign a VLAN ID (e.g., 50), and configure the subnet (e.g., 192.168.50.0/24). The gateway will be automatically set to 192.168.50.1. Enable the DHCP server and set the range. Then assign the VLAN to switch ports or WiFi networks as needed."),
+
+    qa("What's the difference between a tagged and untagged VLAN?",
+       "An untagged (native/access) VLAN strips the VLAN tag before sending frames to the device — used for devices that don't understand VLANs. A tagged (trunk) VLAN keeps the 802.1Q tag in the frame — used between switches, APs, and VLAN-aware devices. A trunk port carries multiple tagged VLANs plus one untagged VLAN."),
+
+    qa("How many VLANs should a home network have?",
+       "A typical home network benefits from 3-5 VLANs: Main LAN (trusted devices), IoT (smart home gadgets), Guest (visitors), Media/Server (NAS, Plex), and optionally a Management VLAN for network gear. More than 8 VLANs is usually overkill for home use and adds management complexity."),
+
+    qa("Can devices on different VLANs communicate?",
+       "Not by default — VLANs are isolated broadcast domains. To allow cross-VLAN traffic, you need inter-VLAN routing with firewall rules. For example, you might allow your main LAN to reach the media VLAN to access Plex, but block IoT from reaching anything except the internet."),
+
+    qa("What VLAN ID should I use?",
+       "VLAN IDs range from 1-4094. VLAN 1 is the default and should be avoided for security. Common practice is to use IDs that match your third octet: VLAN 50 → 192.168.50.0/24, VLAN 53 → 192.168.53.0/24. This makes troubleshooting easier since you can identify the VLAN from any IP address."),
+
+    # === SUBNETTING ===
+    qa("Explain subnetting for home networks.",
+       "Subnetting divides your network into smaller segments. For home use, /24 subnets (255.255.255.0) give you 254 usable hosts each — more than enough. Use private ranges: 10.0.0.0/8, 172.16.0.0/12, or 192.168.0.0/16. A common pattern is 192.168.X.0/24 where X maps to VLAN IDs (e.g., VLAN 53 = 192.168.53.0/24)."),
+
+    qa("What is CIDR notation?",
+       "CIDR (Classless Inter-Domain Routing) notation combines an IP address with its subnet mask length. Example: 192.168.53.0/24 means the first 24 bits are the network portion, leaving 8 bits (256 addresses, 254 usable) for hosts. /24 = 255.255.255.0, /16 = 255.255.0.0, /32 = single host."),
+
+    qa("What's the difference between /24 and /16 subnets?",
+       "A /24 subnet has 256 addresses (254 usable hosts) — the last octet varies. A /16 subnet has 65,536 addresses (65,534 usable) — the last two octets vary. For home networks, /24 is standard per VLAN. /16 is way too large and creates an unnecessarily big broadcast domain."),
+
+    qa("What private IP ranges are available?",
+       "Three private ranges: 10.0.0.0/8 (16M addresses), 172.16.0.0/12 (1M addresses), and 192.168.0.0/16 (65K addresses). Home networks typically use 192.168.x.x. Enterprise often uses 10.x.x.x for more space. These addresses are never routed on the public internet."),
+
+    # === UNIFI SPECIFIC ===
+    qa("What is a UniFi Cloud Gateway Fiber?",
+       "The UniFi Cloud Gateway Fiber (UCG-Fiber) is Ubiquiti's all-in-one gateway with built-in fiber SFP+ ports for direct ISP fiber connections. It runs UniFi OS and handles routing, firewall, VPN, IDS/IPS, and network management. It's the brain of a UniFi network, combining a router and UniFi controller."),
+
+    qa("How do I set up a UniFi network from scratch?",
+       "1) Connect the gateway to your ISP (WAN port or fiber SFP). 2) Connect a switch to the gateway's LAN port. 3) Adopt the gateway in the UniFi controller (unifi.ui.com or local). 4) Create networks/VLANs under Settings > Networks. 5) Create WiFi networks under Settings > WiFi. 6) Configure firewall rules under Settings > Firewall & Security. 7) Adopt switches and APs as you connect them."),
+
+    qa("What is the USW Flex XG?",
+       "The USW Flex XG is a 5-port 10GbE UniFi switch. All ports support 10G, making it ideal as an aggregation switch connecting your NAS, server, and gateway at full 10G speeds. It's managed through the UniFi controller and supports VLANs on all ports."),
+
+    qa("How do I adopt a UniFi device?",
+       "Connect the device to your network. It should appear in the UniFi controller under Devices as 'Pending Adoption'. Click Adopt. If it doesn't appear: 1) Ensure it's on the same L2 network as the controller. 2) Factory reset the device (hold reset 10+ seconds). 3) SSH into it and set the inform URL: `set-inform http://<controller-ip>:8080/inform`."),
+
+    qa("How do I update UniFi firmware?",
+       "In the UniFi controller, go to Devices, select the device, and check for available updates. You can enable auto-update under Settings > System > Updates. For production networks, test updates on one device first. Always backup your controller settings before major firmware updates."),
+
+    qa("What's the difference between UniFi and EdgeRouter?",
+       "UniFi is Ubiquiti's managed ecosystem with a unified controller for all devices (gateway, switches, APs). EdgeRouter is their standalone router line with more granular CLI control but no central management. UniFi is easier to manage; EdgeRouter offers more advanced routing features. They can coexist but are managed separately."),
+
+    # === WIFI ===
+    qa("What's the best WiFi channel for 2.4GHz?",
+       "Use channels 1, 6, or 11 — they're the only non-overlapping channels on 2.4GHz. Check for interference with a WiFi analyzer app and pick the least congested one. In dense environments (apartments), there's no escaping overlap, but sticking to 1/6/11 minimizes it."),
+
+    qa("Should I use 2.4GHz or 5GHz for my devices?",
+       "5GHz gives faster speeds and less interference but shorter range. Use 5GHz for laptops, phones, and streaming devices that are within range of the AP. Use 2.4GHz for IoT devices, devices far from the AP, and older devices that don't support 5GHz."),
+
+    qa("What is WiFi 6 and do I need it?",
+       "WiFi 6 (802.11ax) improves speed, capacity, and efficiency over WiFi 5 (802.11ac). Key features: OFDMA (better multi-device handling), MU-MIMO, BSS coloring (reduced interference), and Target Wake Time (better battery life for IoT). You need WiFi 6 clients to benefit — upgrading the AP alone won't help legacy devices."),
+
+    qa("How do I fix WiFi dead zones?",
+       "Options: 1) Reposition your AP to a central location. 2) Add another AP and use a mesh or wired backhaul. 3) Check for interference (microwaves, Bluetooth, neighboring networks). 4) Reduce transmit power on nearby APs to avoid co-channel interference. 5) For UniFi, enable fast roaming (802.11r) so devices switch APs seamlessly."),
+
+    qa("What transmit power should I set on my UniFi AP?",
+       "Start with 'Auto' and adjust. For a single AP in a house, medium-high power works. For multiple APs, use medium or low power to create distinct coverage cells and encourage roaming. High power on all APs causes sticky clients — devices hold onto a far AP instead of switching to a closer one."),
+
+    qa("How does band steering work in UniFi?",
+       "Band steering encourages dual-band clients to connect on 5GHz instead of 2.4GHz. In UniFi, it's enabled per SSID under WiFi settings. It works by briefly delaying the 2.4GHz probe response, nudging capable clients toward 5GHz. If a client can't connect on 5GHz, it falls back to 2.4GHz."),
+
+    qa("What is a U6 Lite access point?",
+       "The U6 Lite is an entry-level UniFi WiFi 6 AP. It supports 2x2 MU-MIMO, WiFi 6 (802.11ax) on both bands, and is powered by PoE (802.3af). It's ideal for small to medium rooms and handles up to ~300 clients. Mount it on the ceiling for best coverage with its omnidirectional antenna pattern."),
+
+    # === FIREWALL ===
+    qa("How do I set up firewall rules in UniFi?",
+       "Go to Settings > Firewall & Security > Firewall Rules. Create rules specifying: source (network/IP), destination (network/IP), port/protocol, and action (allow/drop/reject). Rules are processed top-to-bottom — put specific rules before general ones. The implicit rule at the end depends on the chain (LAN-to-LAN defaults to allow in some setups)."),
+
+    qa("How do I block IoT devices from accessing my main network?",
+       "Create a firewall rule: Source = IoT network/VLAN, Destination = Main LAN network, Action = Drop. Place this before any allow rules. Then create another rule to allow IoT to reach the internet (Destination = Any, Action = Allow). This lets IoT devices function online but can't reach your computers or NAS."),
+
+    qa("What firewall rules should I have for a home network?",
+       "Essential rules: 1) Block IoT → LAN (prevent smart devices from reaching computers). 2) Block Guest → all private networks. 3) Allow LAN → all (trusted devices access everything). 4) Allow established/related connections (so responses come back). 5) Optionally allow LAN → Media VLAN for Plex access. 6) Block inter-VLAN by default, then whitelist specific flows."),
+
+    qa("What is NAT and how does it work?",
+       "NAT (Network Address Translation) maps private IPs to your public IP for internet access. Your router maintains a translation table: when 192.168.53.10 sends a request, NAT rewrites the source to your public IP with a unique port. When the response comes back, NAT routes it to the original private IP. This lets hundreds of devices share one public IP."),
+
+    qa("How do I set up port forwarding in UniFi?",
+       "Go to Settings > Firewall & Security > Port Forwarding. Create a rule with: the external port, internal IP and port, and protocol (TCP/UDP). Example: forward external port 8080 to 192.168.53.10:80 for a web server. Only forward ports you actually need — each open port is a potential attack surface."),
+
+    qa("What is IDS/IPS in UniFi?",
+       "IDS (Intrusion Detection System) monitors traffic for threats and alerts you. IPS (Intrusion Prevention System) actively blocks detected threats. In UniFi, enable under Settings > Firewall & Security > Threat Management. IPS can impact throughput — on a Cloud Gateway Fiber, the impact is minimal. Start with IDS to monitor before switching to IPS."),
+
+    # === DNS ===
+    qa("What DNS server should I use for my home network?",
+       "Options: 1) Cloudflare (1.1.1.1) — fast, privacy-focused. 2) Google (8.8.8.8) — reliable, fast. 3) Quad9 (9.9.9.9) — blocks malware domains. 4) Pi-hole or AdGuard Home — self-hosted, blocks ads network-wide. For best results, run Pi-hole/AdGuard locally and set upstream DNS to Cloudflare or Quad9."),
+
+    qa("How do I set up Pi-hole on my network?",
+       "Install Pi-hole on a Linux machine or Raspberry Pi. Set it as the DNS server in your DHCP settings (UniFi: Settings > Networks > edit network > DHCP Name Server = Pi-hole IP). Pi-hole blocks ad domains by returning NXDOMAIN. Access the dashboard at http://<pihole-ip>/admin. Use gravity lists like Steven Black's unified hosts for broad blocking."),
+
+    qa("What is split DNS and when do I need it?",
+       "Split DNS returns different results for the same domain based on the client's location. Common use: resolving your public domain to internal IPs when accessed from inside your network. Without split DNS, accessing mysite.com from LAN would hairpin through your router. Set up local DNS entries in Pi-hole or your router for internal services."),
+
+    qa("What is DNS over HTTPS (DoH)?",
+       "DoH encrypts DNS queries inside HTTPS, preventing ISPs and attackers from seeing which domains you resolve. Configure it in your browser or at the router level. UniFi supports DoH in newer firmware. Downside: it can bypass Pi-hole if clients use their own DoH resolver — block outgoing port 443 to known DoH servers to prevent this."),
+
+    qa("How do I configure DHCP DNS settings in UniFi?",
+       "Go to Settings > Networks > select the network > Advanced > DHCP Name Server. Choose 'Manual' and enter your DNS server IPs (e.g., Pi-hole at 192.168.53.10, with 1.1.1.1 as backup). All devices getting DHCP on this network will use these DNS servers. Static IP devices need DNS configured manually."),
+
+    # === KRZ NETWORK SPECIFIC ===
+    qa("Describe the network layout.",
+       "The network uses a UniFi Cloud Gateway Fiber at 192.168.53.1 with 8 VLANs on the 192.168.50-57.x range. The main LAN is VLAN 53 (192.168.53.0/24) with 16+ devices. VLAN 55 has media devices (TV, PC). VLAN 56 is the media/server VLAN running Plex (192.168.56.231) and PlexDownloader (192.168.56.244) behind an Internet VPN. WiFi uses a U6 Lite AP with SSIDs 'Cheerios' (main) and 'CheerioIOT' (IoT). A USW Flex XG 10G switch handles backbone connectivity. Total: ~27 client devices."),
+
+    qa("What VLANs are in use on this network?",
+       "8 VLANs on 192.168.50-57.x: VLAN 50-52 are mostly empty/reserved. VLAN 53 is the main LAN (~16 devices including servers and workstations). VLAN 54 has at least one iPhone. VLAN 55 has 3 devices (TV, Windows PC, and one unidentified). VLAN 56 is the media VLAN (Plex server + PlexDownloader, both on VPN). VLAN 57 is gateway-only, possibly reserved."),
+
+    qa("Where is the Plex server and how is it configured?",
+       "Plex runs on VLAN 56 (media/server VLAN) at 192.168.56.231. PlexDownloader is alongside it at 192.168.56.244. Both route through an 'Internet VPN Canada' connection for privacy. They're isolated from the main LAN (VLAN 53) by default — firewall rules likely allow VLAN 53 → VLAN 56 for Plex access while keeping the media VLAN otherwise isolated."),
+
+    qa("What WiFi SSIDs are available?",
+       "Two SSIDs: 'Cheerios' is the main WiFi network (likely mapped to VLAN 53 or a trusted VLAN) and 'CheerioIOT' is for IoT devices (mapped to the IoT VLAN for isolation). Both are broadcast by the U6 Lite AP. Band steering is likely enabled to push capable devices to 5GHz on Cheerios."),
+
+    qa("What switch is used for backbone connectivity?",
+       "A USW Flex XG provides 10GbE backbone connectivity. Its 5 ports connect high-bandwidth devices like the NAS, gateway uplink, and server. The 10G links ensure the NAS and Plex server can stream without bottlenecking, especially important for multiple concurrent 4K streams or large file transfers."),
+
+    qa("How should IoT devices be set up on this network?",
+       "Connect IoT devices to the 'CheerioIOT' SSID. This places them on a separate VLAN isolated from the main LAN (VLAN 53). Firewall rules should block IoT → VLAN 53 traffic while allowing IoT → internet. If specific IoT devices need to reach Home Assistant (on the main LAN at 192.168.53.246), create a targeted allow rule for that specific IP and port."),
+
+    qa("Where is Home Assistant on the network?",
+       "Home Assistant runs at 192.168.53.246 on port 8123, on the main LAN (VLAN 53). IoT devices on CheerioIOT VLAN need a firewall rule to reach it. Ideally, create a rule allowing IoT VLAN → 192.168.53.246:8123 only, keeping the rest of VLAN 53 blocked from IoT."),
+
+    # === VPN ===
+    qa("How do I set up a VPN in UniFi?",
+       "UniFi supports WireGuard and OpenVPN. Go to Settings > VPN > Create VPN Server. For WireGuard: enable it, set the port (default 51820), and create client configs. For site-to-site: use Settings > VPN > Site-to-Site. For routing specific devices through a VPN client: create a VPN client connection and assign it to a network or specific devices via traffic rules."),
+
+    qa("How do I route specific devices through a VPN?",
+       "In UniFi, create a VPN client connection (Settings > VPN > VPN Client). Then use Traffic Management to route specific clients through it. Alternatively, put those devices on a dedicated VLAN and set the VLAN's gateway to the VPN interface. This is how Plex/PlexDownloader on VLAN 56 route through 'Internet VPN Canada'."),
+
+    qa("What is WireGuard and how does it compare to OpenVPN?",
+       "WireGuard is a modern VPN protocol — faster, simpler, and more secure than OpenVPN. It uses state-of-the-art cryptography (ChaCha20, Curve25519), has ~4000 lines of code vs OpenVPN's ~100,000, and handles reconnections faster. UniFi supports both, but WireGuard is preferred for new setups due to better performance."),
+
+    # === TROUBLESHOOTING ===
+    qa("My device keeps disconnecting from WiFi. How do I fix it?",
+       "Troubleshooting steps: 1) Check signal strength — move closer to AP or add another AP. 2) Check for channel congestion — use a WiFi analyzer and switch channels. 3) Disable band steering if the device struggles with 5GHz. 4) Check for IP conflicts (two devices with same IP). 5) Update device drivers/firmware. 6) In UniFi, check the client's connection log for disconnect reasons under Clients > device > Activity."),
+
+    qa("How do I check network performance in UniFi?",
+       "UniFi controller provides: 1) Dashboard — overall network stats. 2) Clients — per-device bandwidth, signal strength, experience score. 3) Traffic — application-level traffic analysis. 4) Devices — switch/AP port utilization and errors. 5) Speed test — built-in speed test under Settings. For deeper analysis, enable DPI (Deep Packet Inspection) under Settings > Traffic Management."),
+
+    qa("A device can't get an IP address. What do I check?",
+       "Check: 1) DHCP server is enabled on the correct network/VLAN. 2) DHCP pool isn't exhausted (check leases in UniFi). 3) The switch port is on the correct VLAN (tagged/untagged). 4) The device is actually connected (check link lights). 5) Try a static IP to rule out DHCP issues. 6) Check if the device's MAC is blocked by any MAC filter or firewall rule."),
+
+    qa("How do I find what's using all my bandwidth?",
+       "In UniFi: 1) Enable DPI under Settings > Traffic Management. 2) Check the Traffic dashboard for top applications and clients. 3) Go to Clients and sort by usage. 4) Check for unexpected devices — could be malware or a neighbor on your WiFi. You can also use per-client bandwidth limits under Traffic Management > Rate Limiting."),
+
+    qa("My Plex is buffering. What should I check?",
+       "Check: 1) Plex server CPU — is it transcoding? Direct play avoids this. 2) Network path — is the client on the same VLAN or going through the router? 3) VPN overhead — Plex on a VPN adds latency and can reduce throughput. 4) Switch port speed — ensure 1G or 10G, not 100M. 5) WiFi signal strength if the client is wireless. 6) Plex remote access settings if streaming externally."),
+
+    qa("I can't access a device on another VLAN. What's wrong?",
+       "Check: 1) Firewall rules — is inter-VLAN traffic allowed for this source/destination? 2) The destination device's subnet and gateway are correct. 3) The destination isn't running a local firewall blocking the connection. 4) Try pinging the destination's gateway first (e.g., 192.168.56.1) — if that works, the issue is on the destination's side. 5) Check if the destination VLAN's DHCP is working."),
+
+    # === SECURITY ===
+    qa("How do I secure my home network?",
+       "Key steps: 1) Separate IoT devices on their own VLAN. 2) Use strong WiFi passwords (WPA3 if supported, WPA2 minimum). 3) Change default admin credentials. 4) Enable IDS/IPS. 5) Keep firmware updated. 6) Disable UPnP unless needed. 7) Use a firewall to block unnecessary inter-VLAN traffic. 8) Enable 2FA on your UniFi account. 9) Monitor for unknown devices on your network."),
+
+    qa("Should I disable UPnP?",
+       "Yes, disable UPnP in most cases. UPnP lets devices automatically open ports on your router — convenient but dangerous. Malware can use UPnP to expose your network. Instead, manually port-forward only what you need. The only common exception is gaming consoles that need specific ports for online play."),
+
+    qa("What is WPA3 and should I use it?",
+       "WPA3 is the latest WiFi security standard, replacing WPA2. It offers: stronger encryption (SAE instead of PSK), protection against offline dictionary attacks, and forward secrecy. Enable WPA3 if all your devices support it. For mixed environments, use 'WPA2/WPA3 Transitional' mode to support both. Note: some older IoT devices only work with WPA2."),
+
+    qa("How do I detect rogue devices on my network?",
+       "In UniFi: 1) Check Clients for unknown devices and compare MAC addresses. 2) Enable network alerts for new device connections. 3) Use MAC filtering on sensitive VLANs. 4) Periodically review connected clients and remove unknown ones. 5) For serious monitoring, run an IDS that detects ARP spoofing and unauthorized DHCP servers."),
+
+    # === ADVANCED ===
+    qa("How do I set up a guest network in UniFi?",
+       "Create a new network with purpose 'Guest'. This creates an isolated VLAN where guests can reach the internet but not your LAN. Create a WiFi SSID mapped to this network. Enable a guest portal for terms acceptance or password authentication. Set bandwidth limits to prevent guests from consuming all bandwidth. The guest network is automatically isolated from other VLANs."),
+
+    qa("What is 802.11r (fast roaming) and should I enable it?",
+       "802.11r enables fast BSS transition — clients switch between APs in ~50ms instead of ~500ms. Essential for VoIP and video calls when moving between rooms. Enable it in UniFi per SSID. Caveat: some older devices (pre-2015) have issues with 802.11r and may fail to connect. If you have old devices, test before enabling on your main SSID."),
+
+    qa("How do I monitor network traffic with UniFi?",
+       "Enable DPI (Deep Packet Inspection) under Settings > Traffic Management. This classifies traffic by application. View results in the Traffic dashboard. For more detail: 1) Enable NetFlow/sFlow export to an external collector. 2) Use the built-in packet capture under Devices > Gateway > Tools. 3) Mirror a switch port and capture with Wireshark."),
+
+    qa("What is mDNS and why does it matter for VLANs?",
+       "mDNS (Multicast DNS) enables zero-conf service discovery — how AirPlay, Chromecast, and printer auto-discovery work. mDNS is broadcast-scoped, so it doesn't cross VLANs by default. To make an Apple TV on VLAN 55 discoverable from VLAN 53, enable mDNS reflection in UniFi (Settings > Networks > mDNS) or use an Avahi reflector."),
+
+    qa("How does PoE work and which UniFi devices need it?",
+       "PoE (Power over Ethernet) delivers power through the network cable. 802.3af provides up to 15.4W (enough for APs, cameras). 802.3at (PoE+) provides up to 30W. UniFi APs, cameras, and some switches are PoE-powered. Your switch must support PoE output, or use a PoE injector. The U6 Lite needs 802.3af — any PoE switch or injector works."),
+
+    qa("What is a trunk port?",
+       "A trunk port carries traffic for multiple VLANs simultaneously using 802.1Q tagging. Each frame on a trunk port has a VLAN tag identifying which VLAN it belongs to. The native VLAN's traffic is sent untagged. Use trunk ports between switches, and between switches and APs (so the AP can broadcast multiple SSIDs on different VLANs over one cable)."),
+
+    qa("How do I set up link aggregation in UniFi?",
+       "Go to Devices > select the switch > Ports. Select multiple ports, then create a LAG (Link Aggregation Group). Both the switch and the connected device must support LACP. LAG doesn't double the speed of a single connection — it doubles aggregate bandwidth across multiple connections. Useful for NAS devices with dual NICs serving multiple clients simultaneously."),
+
+    qa("What is STP and why is it important?",
+       "STP (Spanning Tree Protocol) prevents broadcast loops in networks with redundant paths. A loop causes a broadcast storm that can crash the network in seconds. STP elects a root bridge and blocks redundant ports. UniFi switches run RSTP (Rapid STP) by default. Never disable STP unless you're absolutely certain there are no loops."),
+
+    # === PRACTICAL SCENARIOS ===
+    qa("I'm adding a security camera. How should I set it up on the network?",
+       "Put cameras on a dedicated VLAN for security. Create a 'Cameras' VLAN with firewall rules: block Cameras → Internet (prevent cloud/hacking), block Cameras → LAN, allow NVR → Cameras (for recording), allow LAN → Cameras (for viewing). Use PoE to power the cameras — one cable for power and data. If using UniFi Protect, the cameras auto-adopt."),
+
+    qa("I want to set up a NAS for media storage. What should I consider?",
+       "Use a 10GbE connection if your switch supports it (USW Flex XG). Place the NAS on the media VLAN (e.g., VLAN 56) if it primarily serves Plex/media. Set a static IP. Configure firewall rules to allow access from your main LAN. Enable SMB/NFS shares for file access. For backups, consider a separate VLAN or CIFS/rsync setup. Use RAID for data protection."),
+
+    qa("How do I optimize my network for gaming?",
+       "1) Use a wired connection — WiFi adds latency and jitter. 2) Enable QoS/traffic shaping to prioritize gaming traffic. 3) Use a separate VLAN or at minimum a dedicated SSID. 4) Disable SQM/Smart Queues if your connection is fast enough. 5) Forward specific game ports instead of using UPnP. 6) Place your gaming device on the switch closest to the router."),
+
+    qa("How should I set up a home lab server?",
+       "Put the server on the main LAN (VLAN 53) or a dedicated server VLAN. Assign a static IP. Use 10GbE if available. For VMs, you might want the server on a trunk port so VMs can be on different VLANs. Firewall rules: allow LAN → server for management, restrict internet access to only what's needed. Use SSH keys, not passwords, for remote access."),
+
+    qa("I want to run a VPN server for remote access. How?",
+       "In UniFi, enable WireGuard VPN server under Settings > VPN. Create client configs for each device. Forward the WireGuard port (default 51820/UDP) on your firewall. Clients connecting from outside will tunnel into your home network. Set which VLANs VPN clients can access — typically the main LAN. Use strong keys and keep the port non-default if paranoid."),
+
+    # === MORE NETWORKING FUNDAMENTALS ===
+    qa("What is ARP and how does it work?",
+       "ARP (Address Resolution Protocol) maps IP addresses to MAC addresses on a local network. When a device needs to send a frame, it broadcasts 'Who has 192.168.53.10?' and the owner replies with its MAC address. The result is cached in the ARP table. ARP only works within a broadcast domain (VLAN). ARP spoofing is an attack where a malicious device claims to be another IP."),
+
+    qa("What is DHCP and how does it assign addresses?",
+       "DHCP (Dynamic Host Configuration Protocol) automatically assigns IP addresses to devices. The process: 1) Device sends DHCP Discover (broadcast). 2) DHCP server responds with Offer. 3) Device sends Request for the offered IP. 4) Server sends Acknowledgment. Leases expire after a set time and are renewed. Configure DHCP per VLAN in UniFi under Network settings."),
+
+    qa("Explain the OSI model briefly.",
+       "7 layers from bottom to top: 1) Physical (cables, signals). 2) Data Link (Ethernet, MAC addresses, switches). 3) Network (IP addresses, routing). 4) Transport (TCP/UDP, ports). 5) Session (connection management). 6) Presentation (encryption, encoding). 7) Application (HTTP, DNS, SMTP). For networking troubleshooting, focus on layers 1-4: is the cable good? Is there a link? Can you ping? Can you connect?"),
+
+    qa("What's the difference between TCP and UDP?",
+       "TCP (Transmission Control Protocol) is connection-oriented — it guarantees delivery, ordering, and error checking. Used for web, email, file transfers. UDP (User Datagram Protocol) is connectionless — fast but no delivery guarantee. Used for DNS, streaming, gaming, VoIP. UDP is preferred when speed matters more than reliability."),
+
+    qa("What is a MAC address?",
+       "A MAC (Media Access Control) address is a 48-bit hardware identifier burned into every network interface (e.g., AA:BB:CC:DD:EE:FF). The first 3 octets identify the manufacturer (OUI). MAC addresses work at Layer 2 (Ethernet) and are used for local network communication. They can be spoofed in software but are generally stable identifiers for network management."),
+
+    qa("What is MTU and should I change it?",
+       "MTU (Maximum Transmission Unit) is the largest packet size a network interface can send — default is 1500 bytes for Ethernet. Larger MTU (jumbo frames, 9000 bytes) reduces overhead for large transfers but all devices on the path must support it. For home networks, leave MTU at 1500 unless you have a dedicated NAS/server VLAN with end-to-end jumbo frame support."),
+
+    # === DOCKER NETWORKING ===
+    qa("How does Docker networking interact with VLANs?",
+       "Docker creates its own bridge network (172.17.0.0/16) by default. Containers get NAT'd through the host's IP. To put a container on a specific VLAN, use Docker's macvlan or ipvlan driver, giving the container an IP directly on the host's VLAN. For most home use, port mapping (-p 8080:80) through the host's IP is simpler and works fine."),
+
+    qa("What Docker network mode should I use?",
+       "Bridge (default) — containers get isolated IPs, use port mapping. Good for most services. Host — container shares host's network stack. Use when you need all host ports or performance. Macvlan — container gets its own IP on the physical network. Use for services that need to appear as separate devices. None — no networking. Use for isolated computation."),
+
+    # === MONITORING ===
+    qa("What should I monitor on my home network?",
+       "Key metrics: 1) Bandwidth per device — spot hogs or malware. 2) DNS queries — Pi-hole dashboard shows blocked ads and queries. 3) New device connections — detect intruders. 4) AP client count and signal — identify overloaded APs. 5) Switch port errors — detect bad cables. 6) Internet uptime/latency — track ISP reliability. 7) CPU/memory on gateway — ensure it's not overloaded."),
+
+    qa("How do I set up alerts for network issues?",
+       "In UniFi: enable alerts under Settings > Notifications for events like device disconnects, high utilization, rogue APs, and firmware updates. For custom monitoring: run a watchdog service that checks device status and sends alerts via Telegram or email. Check services every 5 minutes and alert on any that are unreachable."),
+
+    # === ADDITIONAL Q&A ===
+    qa("What is IGMP snooping?",
+       "IGMP snooping lets switches intelligently forward multicast traffic only to ports that need it, instead of flooding it everywhere. Enable it to reduce unnecessary traffic from IPTV, mDNS, and multicast streaming. In UniFi, IGMP snooping is enabled by default on managed switches. Disable only if you have multicast issues."),
+
+    qa("How do I configure a static IP in UniFi?",
+       "Two ways: 1) DHCP reservation (preferred) — in UniFi, go to Clients > select device > Settings > Use Fixed IP Address. This reserves the IP in DHCP so the device always gets the same address. 2) On the device itself — set a static IP outside the DHCP range with the correct subnet mask, gateway, and DNS server."),
+
+    qa("What is a broadcast storm and how do I prevent it?",
+       "A broadcast storm occurs when broadcast frames loop endlessly between switches, consuming all bandwidth and crashing the network. Prevent it by: 1) Never creating physical loops without STP. 2) Keeping STP enabled (default in UniFi). 3) Enabling storm control on switch ports. 4) Using proper cable management to avoid accidental loops."),
+
+    qa("How do I troubleshoot slow internet but fast LAN?",
+       "If LAN transfers are fast but internet is slow: 1) Run the UniFi built-in speed test — compare with ISP plan. 2) Check if IPS/IDS is reducing throughput. 3) Check DNS — slow DNS can feel like slow internet. 4) Bypass the router and test directly from ISP modem. 5) Check QoS settings — misconfigured SQM can throttle. 6) Contact ISP if speeds are consistently below plan."),
+
+    qa("What is RADIUS authentication?",
+       "RADIUS is a protocol for centralized authentication. In UniFi WiFi, RADIUS replaces pre-shared keys with per-user credentials. Each user logs in with their username/password, and the RADIUS server validates them. Benefits: individual credentials (revoke one user without changing everyone's password), per-user VLAN assignment, and detailed login logging."),
+
+    qa("How do I segment my network for a small business?",
+       "Create VLANs for: 1) Corporate (employees, domain-joined PCs). 2) Guest/Customer WiFi (isolated, bandwidth-limited). 3) VoIP (if using IP phones — needs QoS). 4) Servers/Printers (accessible from corporate only). 5) Security cameras (isolated, no internet). Firewall rules enforce boundaries. Use RADIUS for WiFi auth and 802.1X for wired port auth."),
+
+    qa("What is 802.1X and should I use it?",
+       "802.1X is port-based network access control. Before a device gets network access, it must authenticate (usually via RADIUS). On wired networks, the switch blocks traffic until authentication succeeds. On WiFi, it's WPA-Enterprise. Use it in environments where you need to control exactly who connects. For home, it's overkill — MAC filtering or strong WiFi passwords suffice."),
+
+    qa("How does QoS work in UniFi?",
+       "QoS (Quality of Service) prioritizes certain traffic types. In UniFi, use Smart Queues (SQM) under Settings > Internet > WAN to manage bufferbloat. Traffic rules can prioritize specific devices or applications. For VoIP, prioritize SIP/RTP traffic. For gaming, prioritize by destination or port. Only enable SQM if you experience bufferbloat — it adds processing overhead."),
+
+    qa("What is IPv6 and should I enable it on my home network?",
+       "IPv6 uses 128-bit addresses (vs IPv4's 32-bit), eliminating NAT need. Most ISPs now support it. Enable it in UniFi under Settings > Internet > IPv6. Use DHCPv6 or SLAAC for address assignment. Ensure your firewall rules also cover IPv6 — many forget this. For home use, IPv4 works fine and IPv6 is optional but increasingly useful for direct device connectivity."),
+
+    qa("How do I back up my UniFi controller settings?",
+       "Go to Settings > System > Backup. Enable auto-backup (daily recommended). Backups include network config, device settings, and client data but not historical stats. Download backups periodically and store them off the controller. To restore: Settings > System > Restore from backup file. Always backup before firmware updates or major config changes."),
+
+    qa("What cable category should I use for home networking?",
+       "Cat6 is the sweet spot — supports 10GbE up to 55 meters and 1GbE at 100m. Cat5e works for 1GbE but doesn't support 10G. Cat6a guarantees 10GbE at full 100m. Cat7/Cat8 are overkill for home use. For in-wall runs, use solid core Cat6. For patch cables, stranded Cat6. Always use pure copper, not CCA (copper-clad aluminum)."),
+
+    qa("How do I wire my house for networking?",
+       "Plan runs from a central patch panel to each room. Use Cat6 solid-core cable. Run at least 2 drops per room. Keep cable runs under 90m (300ft). Avoid running parallel to electrical wires. Use conduit in walls for future upgrades. Terminate at a patch panel and switch in your network closet. Label everything. Test each run with a cable tester before closing walls."),
+
+    qa("What is a network closet best practice?",
+       "Best practices: 1) Ventilation — network gear generates heat. 2) Patch panel for all runs — don't plug cables directly into switches. 3) UPS for power protection. 4) Labeled cables. 5) 1U or 2U rack for mounting gear. 6) Keep the gateway, main switch, and patch panel together. 7) Ensure adequate power outlets. 8) Leave room for growth."),
+
+    # === EDGE CASES AND TIPS ===
+    qa("My UniFi controller shows 'Disconnected' for a device that's working fine. Why?",
+       "The device is probably working but lost its management connection to the controller. This happens when: 1) The device can't reach the controller IP. 2) DNS resolution fails for the inform URL. 3) Controller was restarted and the device hasn't re-informed yet. SSH into the device and run `info` to check its inform URL. Force a provision from the controller to re-establish the connection."),
+
+    qa("How do I factory reset a UniFi device?",
+       "Hold the reset button for 10+ seconds until the LED flashes rapidly. The device will reboot with factory defaults and reappear in the controller as 'Pending Adoption'. For a switch or AP that's remote, you can SSH in and run `syswrapper.sh restore-default`. Note: factory reset clears all config including static IPs and VLAN assignments."),
+
+    qa("What does the experience score in UniFi mean?",
+       "The experience score (0-100%) measures WiFi client quality. It considers: signal strength (RSSI), noise floor, channel utilization, retransmission rate, and connection speed. Below 70% indicates poor experience. Improve it by: moving the AP closer, reducing interference, lowering AP power to reduce co-channel issues, or adding another AP."),
+
+    qa("How do I limit bandwidth for specific devices?",
+       "In UniFi: 1) Per-client: Clients > select device > Settings > Rate Limit (set up/down speeds). 2) Per-network: Create traffic rules under Settings > Traffic Management. 3) Per-SSID: Edit the WiFi network and set bandwidth limits. 4) Use Smart Queues (SQM) on WAN to manage total bandwidth fairly. Combination of per-network and SQM works best."),
+
+    qa("What's the difference between a managed and unmanaged switch?",
+       "Unmanaged switches are plug-and-play — no configuration possible. All ports are on the same VLAN. Managed switches (like UniFi USW series) support VLANs, port mirroring, link aggregation, IGMP snooping, STP, PoE management, and traffic monitoring. For a VLAN-based network, managed switches are required. Unmanaged switches work only for simple setups."),
+
+    qa("How often should I update firmware on network equipment?",
+       "Check monthly, apply quarterly unless there's a critical security patch. For UniFi: 1) Read release notes before updating. 2) Backup first. 3) Update the controller/gateway first, then switches, then APs. 4) Never update during critical usage times. 5) Don't enable auto-update for gateway — a bad update could kill internet access. Auto-update for APs is generally safe."),
+]
+
+# Write the training data
+output_path = "training_data.json"
+with open(output_path, "w") as f:
+    json.dump(data, f, indent=2)
+
+print(f"Generated {len(data)} training examples → {output_path}")
