@@ -80,7 +80,14 @@ def parse_bin_tools(text):
             m = pattern.match(line.strip())
             if m:
                 category = m.group(1).strip()
-                items = [t.strip() for t in m.group(2).split(",")]
+                items = []
+                for t in m.group(2).split(","):
+                    # Strip parenthetical descriptions:
+                    # "fintools (quote/hist/...)" → "fintools"
+                    # "ollama-grid-search (model comparison UI)" → "ollama-grid-search"
+                    name = re.sub(r'\s*\(.*\)\s*$', '', t).strip()
+                    if name:
+                        items.append(name)
                 tools[category] = items
     return tools
 
