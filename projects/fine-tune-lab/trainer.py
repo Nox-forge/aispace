@@ -144,12 +144,12 @@ class FineTuner:
             latest_checkpoint = self._get_latest_checkpoint()
             if latest_checkpoint:
                 logger.info(f"Loading weights from {latest_checkpoint}")
-                state_dict = torch.load(
-                    latest_checkpoint / "pytorch_model.bin",
-                    map_location="auto",
-                    weights_only=True,
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    str(latest_checkpoint),
+                    torch_dtype=torch.bfloat16,
+                    device_map="auto",
+                    trust_remote_code=True,
                 )
-                self.model.load_state_dict(state_dict, strict=False)
 
             # Load data
             self.status.stage = "training"
