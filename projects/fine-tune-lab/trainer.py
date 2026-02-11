@@ -302,10 +302,15 @@ class FineTuner:
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
-            # Check available GPU memory and set limit (leave 1GB headroom for other processes)
+            # GPU memory budgeting: training peak ≈ 3x model weights + activations
+            # (model bf16 + optimizer 8-bit states + gradients bf16 + ~3GB activations)
+            # Cap model placement so peak fits in available GPU, overflow layers to CPU RAM.
             free_mem, total_mem = torch.cuda.mem_get_info(0)
-            gpu_limit = f"{int((free_mem / 1e9) - 1)}GiB"
-            logger.info(f"GPU memory: {free_mem/1e9:.1f}GB free / {total_mem/1e9:.1f}GB total — capping at {gpu_limit}")
+            available_gb = free_mem / (1024**3)
+            model_limit_gb = max(1.0, (available_gb - 3.0) / 3.0)
+            gpu_limit = f"{model_limit_gb:.1f}GiB"
+            logger.info(f"GPU memory: {available_gb:.1f}GB free / {total_mem/(1024**3):.1f}GB total")
+            logger.info(f"Model placement cap: {gpu_limit} (overflow to CPU RAM)")
 
             self.model = AutoModelForCausalLM.from_pretrained(
                 HF_BASE_MODEL,
