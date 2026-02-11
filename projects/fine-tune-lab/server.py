@@ -10,6 +10,7 @@ from typing import Optional
 import httpx
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from trainer import FineTuner
@@ -199,6 +200,18 @@ async def load_snapshot(version: str):
         raise HTTPException(404, f"Snapshot {version} not found or conversion failed")
 
     return {"message": f"Loaded snapshot {version}", "model": get_latest_tuned_model()}
+
+
+@app.get("/gguf/{version}")
+async def download_gguf(version: str):
+    """Download the GGUF file for a specific round."""
+    if not version.startswith("round_"):
+        version = f"round_{version}"
+    from pathlib import Path
+    gguf_path = Path("/data/gguf") / version / "model.gguf"
+    if not gguf_path.exists():
+        raise HTTPException(404, f"GGUF not found for {version}")
+    return FileResponse(str(gguf_path), media_type="application/octet-stream", filename=f"{version}.gguf")
 
 
 if __name__ == "__main__":
