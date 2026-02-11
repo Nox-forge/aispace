@@ -16,12 +16,11 @@ RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git /opt/llama.cp
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Cache bust: this URL changes on every git push, forcing re-fetch of code below
-ADD https://api.github.com/repos/Nox-forge/aispace/git/refs/heads/master /tmp/cache_bust.json
-
-# Fetch app code fresh from GitHub (not from build context cache)
-RUN curl -sL https://raw.githubusercontent.com/Nox-forge/aispace/master/projects/fine-tune-lab/trainer.py -o /app/trainer.py \
-    && curl -sL https://raw.githubusercontent.com/Nox-forge/aispace/master/projects/fine-tune-lab/server.py -o /app/server.py
+# Fetch app code fresh from GitHub via git clone (bypasses CDN cache)
+RUN git clone --depth 1 https://github.com/Nox-forge/aispace.git /tmp/aispace \
+    && cp /tmp/aispace/projects/fine-tune-lab/trainer.py /app/ \
+    && cp /tmp/aispace/projects/fine-tune-lab/server.py /app/ \
+    && rm -rf /tmp/aispace
 
 WORKDIR /app
 RUN mkdir -p /data/checkpoints /data/gguf /data/training /data/rag
