@@ -15,6 +15,7 @@ Endpoints:
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -193,6 +194,36 @@ async def build_rag_index(background_tasks: BackgroundTasks):
         "method": "rag",
         "target_model": MODEL_NAMES["rag"],
     }
+
+
+class UploadDataRequest(BaseModel):
+    data: list[dict]
+    filename: str = "training_data.json"
+
+
+@app.post("/data/upload")
+async def upload_training_data(req: UploadDataRequest):
+    """Upload training data to the container's /data/training/ directory."""
+    from pathlib import Path
+    training_dir = Path("/data/training")
+    training_dir.mkdir(parents=True, exist_ok=True)
+    path = training_dir / req.filename
+    path.write_text(json.dumps(req.data, indent=2))
+    return {"message": f"Saved {len(req.data)} examples to {path}", "path": str(path)}
+
+
+@app.get("/data/list")
+async def list_training_data():
+    """List training data files."""
+    from pathlib import Path
+    training_dir = Path("/data/training")
+    training_dir.mkdir(parents=True, exist_ok=True)
+    files = []
+    for f in sorted(training_dir.glob("*.json")):
+        data = json.loads(f.read_text())
+        count = len(data) if isinstance(data, list) else 1
+        files.append({"name": f.name, "examples": count, "size_kb": round(f.stat().st_size / 1024, 1)})
+    return {"files": files}
 
 
 @app.post("/train")
