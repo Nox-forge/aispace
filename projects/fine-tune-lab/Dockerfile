@@ -2,6 +2,7 @@ FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \

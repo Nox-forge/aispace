@@ -302,21 +302,13 @@ class FineTuner:
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
-            # GPU memory budgeting: training peak ≈ 3x model weights + activations
-            # (model bf16 + optimizer 8-bit + gradients bf16 + ~3GB activations/CUDA overhead)
-            # For 3B model (6.4GB weights): cap at 5GB to offload ~1.4GB to CPU.
-            # This saves ~4GB GPU total (model + optimizer + grads for offloaded layers).
-            free_mem, total_mem = torch.cuda.mem_get_info(0)
-            logger.info(f"GPU memory: {free_mem/(1024**3):.1f}GB free / {total_mem/(1024**3):.1f}GB total")
-            logger.info("Model placement cap: 5GiB GPU, overflow to CPU RAM")
-
+            # Load model directly to GPU — no device_map="auto" (unreliable with Trainer)
             self.model = AutoModelForCausalLM.from_pretrained(
                 HF_BASE_MODEL,
                 torch_dtype=torch.bfloat16,
-                device_map="auto",
-                max_memory={0: "5GiB", "cpu": "40GiB"},
                 trust_remote_code=True,
-            )
+            ).to("cuda")
+            logger.info(f"Model loaded to GPU: {sum(p.numel()*p.element_size() for p in self.model.parameters())/1e9:.1f}GB")
 
             # Load and format data
             self.status.stage = "training"
@@ -329,9 +321,6 @@ class FineTuner:
             output_dir = CHECKPOINTS_DIR / "full" / f"round_{round_num}"
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            # Set CUDA memory config before training
-            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-
             training_args = SFTConfig(
                 output_dir=str(output_dir),
                 num_train_epochs=epochs,
@@ -343,7 +332,7 @@ class FineTuner:
                 logging_steps=5,
                 save_strategy="epoch",
                 bf16=True,
-                max_length=512,
+                max_length=256,
                 dataset_text_field="text",
                 report_to="none",
                 optim="adamw_bnb_8bit",

@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
     logger.info("Fine-Tune Lab shutting down")
 
 
-app = FastAPI(title="Fine-Tune Lab", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Fine-Tune Lab", version="2.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 tuner = FineTuner(ollama_url=OLLAMA_URL)
