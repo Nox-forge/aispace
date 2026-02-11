@@ -515,7 +515,7 @@ class FineTuner:
 
     # ── RAG Index Builder ─────────────────────────────────────
 
-    def build_rag_index(self):
+    def build_rag_index(self, extra_data: Optional[list[dict]] = None):
         """Build FAISS vector index from training data for retrieval-augmented generation.
 
         Embeds all training questions with all-MiniLM-L6-v2 (384d), stores in FAISS.
@@ -532,6 +532,13 @@ class FineTuner:
             logger.info("=== Building RAG index ===")
 
             raw_data = self._load_raw_training_data()
+            if extra_data:
+                raw_data.extend(extra_data)
+                # Also save to disk for future use
+                TRAINING_DIR.mkdir(parents=True, exist_ok=True)
+                import json as _json
+                (TRAINING_DIR / "training_data.json").write_text(_json.dumps(extra_data, indent=2))
+                logger.info(f"Saved {len(extra_data)} examples to {TRAINING_DIR}/training_data.json")
             if not raw_data:
                 raise ValueError("No training data found")
 

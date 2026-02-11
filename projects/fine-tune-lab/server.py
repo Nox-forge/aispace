@@ -183,12 +183,17 @@ async def start_lora_training(req: TrainLoraRequest, background_tasks: Backgroun
     }
 
 
+class RagIndexRequest(BaseModel):
+    extra_data: Optional[list[dict]] = None
+
+
 @app.post("/train/rag-index")
-async def build_rag_index(background_tasks: BackgroundTasks):
+async def build_rag_index(background_tasks: BackgroundTasks, req: Optional[RagIndexRequest] = None):
     if tuner.status.running:
         raise HTTPException(409, "Training already in progress")
 
-    background_tasks.add_task(tuner.build_rag_index)
+    extra_data = req.extra_data if req else None
+    background_tasks.add_task(tuner.build_rag_index, extra_data)
     return {
         "message": "RAG index build started",
         "method": "rag",
