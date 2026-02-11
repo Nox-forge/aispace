@@ -302,10 +302,16 @@ class FineTuner:
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
+            # Check available GPU memory and set limit (leave 1GB headroom for other processes)
+            free_mem, total_mem = torch.cuda.mem_get_info(0)
+            gpu_limit = f"{int((free_mem / 1e9) - 1)}GiB"
+            logger.info(f"GPU memory: {free_mem/1e9:.1f}GB free / {total_mem/1e9:.1f}GB total — capping at {gpu_limit}")
+
             self.model = AutoModelForCausalLM.from_pretrained(
                 HF_BASE_MODEL,
                 torch_dtype=torch.bfloat16,
                 device_map="auto",
+                max_memory={0: gpu_limit, "cpu": "40GiB"},
                 trust_remote_code=True,
             )
 
