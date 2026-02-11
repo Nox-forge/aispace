@@ -16,7 +16,7 @@ RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git /opt/llama.cp
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# App code
+# App code (cache bust: v2)
 COPY trainer.py server.py /app/
 WORKDIR /app
 
