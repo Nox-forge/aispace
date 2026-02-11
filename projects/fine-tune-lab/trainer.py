@@ -192,24 +192,28 @@ class FineTuner:
             with httpx.Client(timeout=600) as client:
                 resp = client.head(f"{self.ollama_url}/api/blobs/{digest}")
                 if resp.status_code != 200:
-                    logger.info(f"Uploading GGUF blob ({gguf_path.stat().st_size / 1e6:.0f}MB)...")
+                    size_mb = gguf_path.stat().st_size / 1e6
+                    logger.info(f"Uploading GGUF blob ({size_mb:.0f}MB)...")
                     with open(gguf_path, "rb") as f:
                         resp = client.post(
                             f"{self.ollama_url}/api/blobs/{digest}",
-                            content=f.read(),
+                            content=f,
                         )
                         resp.raise_for_status()
+                    logger.info("Blob upload complete")
+                else:
+                    logger.info("Blob already exists in Ollama")
 
                 logger.info(f"Creating Ollama model {model_name}...")
                 resp = client.post(
                     f"{self.ollama_url}/api/create",
                     json={
                         "model": model_name,
-                        "from": f"@{digest}",
-                        "stream": False,
+                        "files": {gguf_path.name: digest},
                         "system": SYSTEM_PROMPT,
+                        "stream": False,
                     },
-                    timeout=120,
+                    timeout=300,
                 )
                 resp.raise_for_status()
             logger.info(f"Model {model_name} registered with Ollama")
