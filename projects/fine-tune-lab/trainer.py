@@ -322,14 +322,15 @@ class FineTuner:
                         )
                         resp.raise_for_status()
 
-                # Create model
-                modelfile = f"""FROM @{digest}
-SYSTEM You are a home networking expert specializing in UniFi, VLANs, firewall configuration, DNS, and WiFi troubleshooting. Give specific, actionable answers."""
-
+                # Create model (new Ollama API format)
                 logger.info(f"Creating Ollama model {model_name}...")
                 resp = client.post(
                     f"{self.ollama_url}/api/create",
-                    json={"name": model_name, "modelfile": modelfile},
+                    json={
+                        "model": model_name,
+                        "from": f"@{digest}",
+                        "system": "You are a home networking expert specializing in UniFi, VLANs, firewall configuration, DNS, and WiFi troubleshooting. Give specific, actionable answers.",
+                    },
                     timeout=120,
                 )
                 resp.raise_for_status()
