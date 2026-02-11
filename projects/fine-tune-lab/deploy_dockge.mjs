@@ -32,7 +32,8 @@ services:
       - "8881:8881"
     environment:
       - OLLAMA_URL=http://host.docker.internal:8080
-      - BASE_MODEL=qwen3:0.6b
+      - BASE_MODEL=llama3.2:3b
+      - HF_BASE_MODEL=unsloth/Llama-3.2-3B-Instruct
       - NVIDIA_VISIBLE_DEVICES=all
       - HF_HOME=/data/hf_cache
     volumes:

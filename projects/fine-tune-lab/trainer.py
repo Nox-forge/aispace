@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────
 
-HF_BASE_MODEL = os.environ.get("HF_BASE_MODEL", "meta-llama/Llama-3.2-3B-Instruct")
+HF_BASE_MODEL = os.environ.get("HF_BASE_MODEL", "unsloth/Llama-3.2-3B-Instruct")
 OLLAMA_BASE_MODEL = os.environ.get("BASE_MODEL", "llama3.2:3b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:8080")
 
