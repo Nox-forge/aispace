@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git /opt/llama.cpp \
     && pip install --no-cache-dir gguf numpy sentencepiece
 
-# App dependencies (rarely changes — cached)
+# App dependencies (changes when requirements.txt changes)
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
@@ -24,7 +24,7 @@ RUN curl -sL https://raw.githubusercontent.com/Nox-forge/aispace/master/projects
     && curl -sL https://raw.githubusercontent.com/Nox-forge/aispace/master/projects/fine-tune-lab/server.py -o /app/server.py
 
 WORKDIR /app
-RUN mkdir -p /data/checkpoints /data/gguf /data/training
+RUN mkdir -p /data/checkpoints /data/gguf /data/training /data/rag
 
 EXPOSE 8881
 

@@ -1,4 +1,18 @@
-"""FastAPI service for the Fine-Tune Lab."""
+"""FastAPI service for the Fine-Tune Lab — 3-way showdown edition.
+
+Endpoints:
+  POST /train/full      — Full weight fine-tuning (8-bit AdamW)
+  POST /train/lora      — LoRA adapter training
+  POST /train/rag-index — Build RAG vector index from training data
+  POST /chat            — Chat with any model
+  POST /chat/rag        — RAG-augmented chat (retrieve + generate)
+  POST /compare         — Compare base vs any trained model
+  POST /benchmark       — Run prompts through all 4 models
+  GET  /status          — Training status
+  GET  /snapshots       — List all training snapshots
+  POST /load/{method}/{version} — Load specific snapshot
+  GET  /gguf/{method}/{version} — Download GGUF file
+"""
 
 import asyncio
 import logging
@@ -13,123 +27,186 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from trainer import FineTuner
+from trainer import FineTuner, MODEL_NAMES, OLLAMA_BASE_MODEL
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:8080")
-BASE_MODEL = os.environ.get("BASE_MODEL", "qwen3:0.6b")
+BASE_MODEL = os.environ.get("BASE_MODEL", "llama3.2:3b")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"Fine-Tune Lab starting — Ollama: {OLLAMA_URL}, Base: {BASE_MODEL}")
+    logger.info(f"Fine-Tune Lab v2 starting — Ollama: {OLLAMA_URL}, Base: {BASE_MODEL}")
+    logger.info(f"Models: {MODEL_NAMES}")
     yield
     logger.info("Fine-Tune Lab shutting down")
 
 
-app = FastAPI(title="Fine-Tune Lab", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Fine-Tune Lab", version="2.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 tuner = FineTuner(ollama_url=OLLAMA_URL)
 
 
-# --- Request/Response models ---
+# ── Request/Response models ───────────────────────────────────
 
-class TrainRequest(BaseModel):
+class TrainFullRequest(BaseModel):
     extra_data: Optional[list[dict]] = None
     epochs: int = 3
     learning_rate: float = 2e-5
-    batch_size: int = 8
+
+
+class TrainLoraRequest(BaseModel):
+    extra_data: Optional[list[dict]] = None
+    epochs: int = 3
+    learning_rate: float = 2e-4
+    lora_rank: int = 16
+    lora_alpha: int = 32
 
 
 class ChatRequest(BaseModel):
     prompt: str
-    model: Optional[str] = None  # defaults to latest tuned
+    model: Optional[str] = None
+    temperature: float = 0.7
+    max_tokens: int = 512
+
+
+class RagChatRequest(BaseModel):
+    prompt: str
+    top_k: int = 3
     temperature: float = 0.7
     max_tokens: int = 512
 
 
 class CompareRequest(BaseModel):
     prompt: str
+    models: Optional[list[str]] = None  # defaults to [base, latest trained]
     temperature: float = 0.7
     max_tokens: int = 512
 
 
-# --- Helper ---
+class BenchmarkRequest(BaseModel):
+    prompts: list[str]
+    temperature: float = 0.7
+    max_tokens: int = 512
+
+
+# ── Helpers ───────────────────────────────────────────────────
 
 async def ollama_generate(model: str, prompt: str, temperature: float = 0.7, max_tokens: int = 512) -> str:
-    """Query Ollama for a completion."""
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=180) as client:
         resp = await client.post(
             f"{OLLAMA_URL}/api/generate",
             json={
                 "model": model,
                 "prompt": prompt,
                 "stream": False,
-                "options": {
-                    "temperature": temperature,
-                    "num_predict": max_tokens,
-                },
+                "options": {"temperature": temperature, "num_predict": max_tokens},
             },
         )
         resp.raise_for_status()
         return resp.json().get("response", "")
 
 
-def get_latest_tuned_model() -> Optional[str]:
-    """Get the name of the latest fine-tuned model in Ollama."""
-    snapshots = tuner.list_snapshots()
-    if not snapshots:
-        return None
-    latest = snapshots[-1]
-    round_num = latest["name"].split("_")[1]
-    return f"qwen3:tuned-r{round_num}"
+async def ollama_model_exists(model: str) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{OLLAMA_URL}/api/show",
+                json={"model": model},
+            )
+            return resp.status_code == 200
+    except Exception:
+        return False
 
 
-# --- Endpoints ---
+# ── Endpoints ─────────────────────────────────────────────────
 
 @app.get("/")
 async def root():
+    available = {}
+    for name, model in MODEL_NAMES.items():
+        available[name] = await ollama_model_exists(model)
     return {
         "service": "Fine-Tune Lab",
-        "status": "running",
+        "version": "2.0.0",
         "ollama_url": OLLAMA_URL,
         "base_model": BASE_MODEL,
-        "latest_tuned": get_latest_tuned_model(),
+        "models": MODEL_NAMES,
+        "available": available,
         "snapshots": len(tuner.list_snapshots()),
     }
 
 
-@app.post("/train")
-async def start_training(req: TrainRequest, background_tasks: BackgroundTasks):
-    """Start a new training round."""
+@app.post("/train/full")
+async def start_full_training(req: TrainFullRequest, background_tasks: BackgroundTasks):
     if tuner.status.running:
         raise HTTPException(409, "Training already in progress")
 
-    def run_training():
-        tuner.train(
-            extra_data=req.extra_data,
-            epochs=req.epochs,
-            learning_rate=req.learning_rate,
-            batch_size=req.batch_size,
-        )
+    def run():
+        tuner.train_full(extra_data=req.extra_data, epochs=req.epochs, learning_rate=req.learning_rate)
 
-    background_tasks.add_task(run_training)
+    background_tasks.add_task(run)
     return {
-        "message": "Training started",
-        "round": tuner.get_current_round(),
+        "message": "Full fine-tuning started",
+        "method": "full",
+        "target_model": MODEL_NAMES["full"],
         "epochs": req.epochs,
     }
 
 
+@app.post("/train/lora")
+async def start_lora_training(req: TrainLoraRequest, background_tasks: BackgroundTasks):
+    if tuner.status.running:
+        raise HTTPException(409, "Training already in progress")
+
+    def run():
+        tuner.train_lora(
+            extra_data=req.extra_data,
+            epochs=req.epochs,
+            learning_rate=req.learning_rate,
+            lora_rank=req.lora_rank,
+            lora_alpha=req.lora_alpha,
+        )
+
+    background_tasks.add_task(run)
+    return {
+        "message": "LoRA fine-tuning started",
+        "method": "lora",
+        "target_model": MODEL_NAMES["lora"],
+        "epochs": req.epochs,
+        "lora_rank": req.lora_rank,
+        "lora_alpha": req.lora_alpha,
+    }
+
+
+@app.post("/train/rag-index")
+async def build_rag_index(background_tasks: BackgroundTasks):
+    if tuner.status.running:
+        raise HTTPException(409, "Training already in progress")
+
+    background_tasks.add_task(tuner.build_rag_index)
+    return {
+        "message": "RAG index build started",
+        "method": "rag",
+        "target_model": MODEL_NAMES["rag"],
+    }
+
+
+@app.post("/train")
+async def start_training_legacy(req: TrainFullRequest, background_tasks: BackgroundTasks):
+    """Legacy endpoint — routes to full fine-tuning."""
+    return await start_full_training(req, background_tasks)
+
+
 @app.get("/status")
 async def training_status():
-    """Get current training status."""
     s = tuner.status
     result = {
         "running": s.running,
+        "method": s.method,
         "stage": s.stage,
         "current_round": s.current_round,
         "current_epoch": round(s.current_epoch, 2),
@@ -145,11 +222,7 @@ async def training_status():
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    """Chat with the fine-tuned model (or specify a model)."""
-    model = req.model or get_latest_tuned_model()
-    if not model:
-        raise HTTPException(404, "No fine-tuned model available yet. Run /train first.")
-
+    model = req.model or BASE_MODEL
     try:
         response = await ollama_generate(model, req.prompt, req.temperature, req.max_tokens)
         return {"model": model, "prompt": req.prompt, "response": response}
@@ -157,61 +230,116 @@ async def chat(req: ChatRequest):
         raise HTTPException(502, f"Ollama error: {e.response.text}")
 
 
-@app.post("/compare")
-async def compare(req: CompareRequest):
-    """Send the same prompt to base and tuned models, return both responses."""
-    tuned_model = get_latest_tuned_model()
-    if not tuned_model:
-        raise HTTPException(404, "No fine-tuned model available yet. Run /train first.")
+@app.post("/chat/rag")
+async def chat_rag(req: RagChatRequest):
+    """RAG-augmented chat: retrieve similar examples, inject as context, query model."""
+    try:
+        examples = tuner.rag_retrieve(req.prompt, top_k=req.top_k)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
 
-    # Query both in parallel
-    base_task = ollama_generate(BASE_MODEL, req.prompt, req.temperature, req.max_tokens)
-    tuned_task = ollama_generate(tuned_model, req.prompt, req.temperature, req.max_tokens)
+    rag_prompt = tuner.format_rag_prompt(req.prompt, examples)
 
     try:
-        base_resp, tuned_resp = await asyncio.gather(base_task, tuned_task)
+        response = await ollama_generate(
+            MODEL_NAMES["rag"], rag_prompt, req.temperature, req.max_tokens
+        )
     except httpx.HTTPStatusError as e:
         raise HTTPException(502, f"Ollama error: {e.response.text}")
 
     return {
+        "model": MODEL_NAMES["rag"],
         "prompt": req.prompt,
-        "base": {"model": BASE_MODEL, "response": base_resp},
-        "tuned": {"model": tuned_model, "response": tuned_resp},
+        "retrieved_examples": examples,
+        "response": response,
     }
+
+
+@app.post("/compare")
+async def compare(req: CompareRequest):
+    """Compare responses from multiple models side-by-side."""
+    models_to_compare = req.models or [BASE_MODEL, MODEL_NAMES["full"]]
+
+    tasks = {m: ollama_generate(m, req.prompt, req.temperature, req.max_tokens) for m in models_to_compare}
+
+    results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+    responses = {}
+    for model, result in zip(tasks.keys(), results):
+        if isinstance(result, Exception):
+            responses[model] = {"error": str(result)}
+        else:
+            responses[model] = {"response": result}
+
+    return {"prompt": req.prompt, "responses": responses}
+
+
+@app.post("/benchmark")
+async def benchmark(req: BenchmarkRequest):
+    """Run the same prompts through all 4 models. Returns structured comparison."""
+    all_results = []
+
+    for prompt in req.prompts:
+        result = {"prompt": prompt, "responses": {}}
+
+        # Build tasks for all models
+        tasks = {}
+        for name, model in MODEL_NAMES.items():
+            if name == "rag":
+                # RAG needs retrieval first
+                try:
+                    examples = tuner.rag_retrieve(prompt, top_k=3)
+                    rag_prompt = tuner.format_rag_prompt(prompt, examples)
+                    tasks[name] = ollama_generate(model, rag_prompt, req.temperature, req.max_tokens)
+                    result.setdefault("rag_examples", examples)
+                except Exception as e:
+                    result["responses"][name] = {"error": str(e)}
+                    continue
+            else:
+                tasks[name] = ollama_generate(model, prompt, req.temperature, req.max_tokens)
+
+        if tasks:
+            responses = await asyncio.gather(*tasks.values(), return_exceptions=True)
+            for name, resp in zip(tasks.keys(), responses):
+                if isinstance(resp, Exception):
+                    result["responses"][name] = {"error": str(resp)}
+                else:
+                    result["responses"][name] = {"text": resp}
+
+        all_results.append(result)
+
+    return {"results": all_results, "models": MODEL_NAMES}
 
 
 @app.get("/snapshots")
 async def list_snapshots():
-    """List all training snapshots."""
     return {"snapshots": tuner.list_snapshots()}
 
 
-@app.post("/load/{version}")
-async def load_snapshot(version: str):
-    """Load a specific snapshot as the active tuned model."""
+@app.post("/load/{method}/{version}")
+async def load_snapshot(method: str, version: str):
     if tuner.status.running:
         raise HTTPException(409, "Cannot load snapshot while training is in progress")
-
+    if method not in ("full", "lora"):
+        raise HTTPException(400, "Method must be 'full' or 'lora'")
     if not version.startswith("round_"):
         version = f"round_{version}"
 
-    success = tuner.load_snapshot(version)
+    success = tuner.load_snapshot(method, version)
     if not success:
-        raise HTTPException(404, f"Snapshot {version} not found or conversion failed")
+        raise HTTPException(404, f"Snapshot {method}/{version} not found or conversion failed")
+    return {"message": f"Loaded {method}/{version}", "model": MODEL_NAMES[method]}
 
-    return {"message": f"Loaded snapshot {version}", "model": get_latest_tuned_model()}
 
-
-@app.get("/gguf/{version}")
-async def download_gguf(version: str):
-    """Download the GGUF file for a specific round."""
+@app.get("/gguf/{method}/{version}")
+async def download_gguf(method: str, version: str):
     if not version.startswith("round_"):
         version = f"round_{version}"
     from pathlib import Path
-    gguf_path = Path("/data/gguf") / version / "model.gguf"
+    gguf_path = Path("/data/gguf") / method / version / "model.gguf"
     if not gguf_path.exists():
-        raise HTTPException(404, f"GGUF not found for {version}")
-    return FileResponse(str(gguf_path), media_type="application/octet-stream", filename=f"{version}.gguf")
+        raise HTTPException(404, f"GGUF not found for {method}/{version}")
+    return FileResponse(str(gguf_path), media_type="application/octet-stream", filename=f"{method}-{version}.gguf")
 
 
 if __name__ == "__main__":
