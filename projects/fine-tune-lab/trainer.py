@@ -239,6 +239,28 @@ class FineTuner:
         except Exception as e:
             logger.error(f"Ollama alias creation failed: {e}")
 
+    def _unload_ollama_models(self):
+        """Unload all models from Ollama VRAM to free GPU memory for training."""
+        try:
+            with httpx.Client(timeout=30) as client:
+                resp = client.get(f"{self.ollama_url}/api/ps")
+                if resp.status_code == 200:
+                    running = resp.json().get("models", [])
+                    for m in running:
+                        name = m.get("name", "")
+                        logger.info(f"Unloading Ollama model {name} from VRAM...")
+                        client.post(
+                            f"{self.ollama_url}/api/generate",
+                            json={"model": name, "keep_alive": 0},
+                            timeout=30,
+                        )
+                    if running:
+                        logger.info(f"Unloaded {len(running)} models from Ollama VRAM")
+                    else:
+                        logger.info("No Ollama models loaded in VRAM")
+        except Exception as e:
+            logger.warning(f"Could not unload Ollama models: {e}")
+
     def _init_status(self, method: str):
         self.status = TrainingStatus(
             running=True,
@@ -268,6 +290,7 @@ class FineTuner:
         """
         try:
             self._init_status("full")
+            self._unload_ollama_models()
             round_num = self.get_next_round("full")
             self.status.current_round = round_num
             self.status.total_epochs = epochs
@@ -391,6 +414,7 @@ class FineTuner:
             from peft import LoraConfig, get_peft_model, TaskType
 
             self._init_status("lora")
+            self._unload_ollama_models()
             round_num = self.get_next_round("lora")
             self.status.current_round = round_num
             self.status.total_epochs = epochs
