@@ -320,6 +320,9 @@ class FineTuner:
             output_dir = CHECKPOINTS_DIR / "full" / f"round_{round_num}"
             output_dir.mkdir(parents=True, exist_ok=True)
 
+            # Set CUDA memory config before training
+            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
             training_args = SFTConfig(
                 output_dir=str(output_dir),
                 num_train_epochs=epochs,
@@ -331,7 +334,7 @@ class FineTuner:
                 logging_steps=5,
                 save_strategy="epoch",
                 bf16=True,
-                max_length=2048,
+                max_length=512,
                 dataset_text_field="text",
                 report_to="none",
                 optim="adamw_bnb_8bit",
