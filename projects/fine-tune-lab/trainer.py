@@ -149,8 +149,14 @@ class FineTuner:
         if self.tokenizer is not None:
             del self.tokenizer
             self.tokenizer = None
+        import gc
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+            # Release the CUDA context so GPU memory returns to the system
+            torch.cuda.reset_accumulated_memory_stats()
+            logger.info(f"GPU cleanup: {torch.cuda.memory_allocated()/1e6:.0f}MB allocated, {torch.cuda.memory_reserved()/1e6:.0f}MB reserved")
 
     def _convert_to_gguf(self, checkpoint_dir: Path, method: str, round_num: int) -> Optional[Path]:
         gguf_out_dir = GGUF_DIR / method / f"round_{round_num}"

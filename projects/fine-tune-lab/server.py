@@ -17,6 +17,7 @@ Endpoints:
 import asyncio
 import json
 import logging
+import multiprocessing
 import os
 import time
 from contextlib import asynccontextmanager
@@ -45,10 +46,122 @@ async def lifespan(app: FastAPI):
     logger.info("Fine-Tune Lab shutting down")
 
 
-app = FastAPI(title="Fine-Tune Lab", version="2.1.0", lifespan=lifespan)
+app = FastAPI(title="Fine-Tune Lab", version="2.2.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 tuner = FineTuner(ollama_url=OLLAMA_URL)
+
+# Status file shared between parent and training subprocess
+STATUS_FILE = "/data/training_status.json"
+
+
+def _write_status(status_dict: dict):
+    """Write status to shared file (called from subprocess)."""
+    import json as _json
+    with open(STATUS_FILE, "w") as f:
+        _json.dump(status_dict, f)
+
+
+def _read_status() -> dict:
+    """Read status from shared file (called from parent)."""
+    try:
+        with open(STATUS_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _run_training_subprocess(method: str, kwargs: dict):
+    """Run training in a subprocess that fully releases GPU on exit."""
+    from trainer import FineTuner
+    t = FineTuner(ollama_url=os.environ.get("OLLAMA_URL", "http://localhost:8080"))
+
+    # Hook into status updates — write to file instead of in-memory
+    original_init = t._init_status
+    original_finish = t._finish_status
+
+    def patched_init(m):
+        original_init(m)
+        _write_status({
+            "running": True, "method": m, "stage": t.status.stage,
+            "current_round": t.status.current_round, "current_epoch": 0.0,
+            "total_epochs": t.status.total_epochs, "loss": None, "error": None,
+            "started_at": t.status.started_at,
+        })
+
+    def patched_finish(error=None):
+        original_finish(error)
+        _write_status({
+            "running": False, "method": t.status.method, "stage": t.status.stage,
+            "current_round": t.status.current_round,
+            "current_epoch": t.status.current_epoch,
+            "total_epochs": t.status.total_epochs,
+            "loss": t.status.loss, "error": t.status.error,
+            "started_at": t.status.started_at, "finished_at": t.status.finished_at,
+        })
+
+    t._init_status = patched_init
+    t._finish_status = patched_finish
+
+    # Periodic status writer (piggyback on trainer callback via a thread)
+    import threading
+    stop_event = threading.Event()
+
+    def status_writer():
+        while not stop_event.is_set():
+            if t.status.running:
+                _write_status({
+                    "running": True, "method": t.status.method, "stage": t.status.stage,
+                    "current_round": t.status.current_round,
+                    "current_epoch": round(t.status.current_epoch, 2),
+                    "total_epochs": t.status.total_epochs,
+                    "loss": round(t.status.loss, 4) if t.status.loss else None,
+                    "error": None, "started_at": t.status.started_at,
+                })
+            stop_event.wait(2)
+
+    writer = threading.Thread(target=status_writer, daemon=True)
+    writer.start()
+
+    try:
+        if method == "full":
+            t.train_full(**kwargs)
+        elif method == "lora":
+            t.train_lora(**kwargs)
+        elif method == "rag-index":
+            t.build_rag_index(extra_data=kwargs.get("extra_data"))
+    except Exception as e:
+        _write_status({
+            "running": False, "method": method, "stage": "idle",
+            "current_round": t.status.current_round,
+            "current_epoch": t.status.current_epoch,
+            "total_epochs": t.status.total_epochs,
+            "loss": t.status.loss, "error": str(e),
+            "started_at": t.status.started_at, "finished_at": time.time(),
+        })
+    finally:
+        stop_event.set()
+    # Process exits here → ALL GPU memory released
+
+
+_training_process: Optional[multiprocessing.Process] = None
+
+
+def _start_training(method: str, kwargs: dict):
+    global _training_process
+    _training_process = multiprocessing.Process(
+        target=_run_training_subprocess, args=(method, kwargs), daemon=True
+    )
+    _training_process.start()
+
+
+def _is_training_running() -> bool:
+    global _training_process
+    if _training_process is not None and _training_process.is_alive():
+        return True
+    # Check status file as fallback
+    status = _read_status()
+    return status.get("running", False)
 
 
 # ── Request/Response models ───────────────────────────────────
@@ -142,16 +255,16 @@ async def root():
 
 
 @app.post("/train/full")
-async def start_full_training(req: TrainFullRequest, background_tasks: BackgroundTasks):
-    if tuner.status.running:
+async def start_full_training(req: TrainFullRequest):
+    if _is_training_running():
         raise HTTPException(409, "Training already in progress")
 
-    def run():
-        tuner.train_full(extra_data=req.extra_data, epochs=req.epochs, learning_rate=req.learning_rate)
-
-    background_tasks.add_task(run)
+    _start_training("full", {
+        "extra_data": req.extra_data, "epochs": req.epochs,
+        "learning_rate": req.learning_rate,
+    })
     return {
-        "message": "Full fine-tuning started",
+        "message": "Full fine-tuning started (subprocess — GPU released on completion)",
         "method": "full",
         "target_model": MODEL_NAMES["full"],
         "epochs": req.epochs,
@@ -159,22 +272,17 @@ async def start_full_training(req: TrainFullRequest, background_tasks: Backgroun
 
 
 @app.post("/train/lora")
-async def start_lora_training(req: TrainLoraRequest, background_tasks: BackgroundTasks):
-    if tuner.status.running:
+async def start_lora_training(req: TrainLoraRequest):
+    if _is_training_running():
         raise HTTPException(409, "Training already in progress")
 
-    def run():
-        tuner.train_lora(
-            extra_data=req.extra_data,
-            epochs=req.epochs,
-            learning_rate=req.learning_rate,
-            lora_rank=req.lora_rank,
-            lora_alpha=req.lora_alpha,
-        )
-
-    background_tasks.add_task(run)
+    _start_training("lora", {
+        "extra_data": req.extra_data, "epochs": req.epochs,
+        "learning_rate": req.learning_rate, "lora_rank": req.lora_rank,
+        "lora_alpha": req.lora_alpha,
+    })
     return {
-        "message": "LoRA fine-tuning started",
+        "message": "LoRA fine-tuning started (subprocess — GPU released on completion)",
         "method": "lora",
         "target_model": MODEL_NAMES["lora"],
         "epochs": req.epochs,
@@ -188,14 +296,14 @@ class RagIndexRequest(BaseModel):
 
 
 @app.post("/train/rag-index")
-async def build_rag_index(background_tasks: BackgroundTasks, req: Optional[RagIndexRequest] = None):
-    if tuner.status.running:
+async def build_rag_index(req: Optional[RagIndexRequest] = None):
+    if _is_training_running():
         raise HTTPException(409, "Training already in progress")
 
     extra_data = req.extra_data if req else None
-    background_tasks.add_task(tuner.build_rag_index, extra_data)
+    _start_training("rag-index", {"extra_data": extra_data})
     return {
-        "message": "RAG index build started",
+        "message": "RAG index build started (subprocess)",
         "method": "rag",
         "target_model": MODEL_NAMES["rag"],
     }
@@ -232,27 +340,39 @@ async def list_training_data():
 
 
 @app.post("/train")
-async def start_training_legacy(req: TrainFullRequest, background_tasks: BackgroundTasks):
+async def start_training_legacy(req: TrainFullRequest):
     """Legacy endpoint — routes to full fine-tuning."""
-    return await start_full_training(req, background_tasks)
+    return await start_full_training(req)
 
 
 @app.get("/status")
 async def training_status():
-    s = tuner.status
+    # Read from shared status file (written by training subprocess)
+    s = _read_status()
+    if not s:
+        return {"running": False, "method": "", "stage": "idle"}
+
+    # Check if subprocess actually died (process gone but status says running)
+    if s.get("running") and _training_process is not None and not _training_process.is_alive():
+        s["running"] = False
+        s["stage"] = "idle"
+        s["error"] = s.get("error") or "Training process exited unexpectedly"
+        _write_status(s)
+
     result = {
-        "running": s.running,
-        "method": s.method,
-        "stage": s.stage,
-        "current_round": s.current_round,
-        "current_epoch": round(s.current_epoch, 2),
-        "total_epochs": s.total_epochs,
-        "loss": round(s.loss, 4) if s.loss else None,
-        "error": s.error,
+        "running": s.get("running", False),
+        "method": s.get("method", ""),
+        "stage": s.get("stage", "idle"),
+        "current_round": s.get("current_round", 0),
+        "current_epoch": round(s.get("current_epoch", 0), 2),
+        "total_epochs": s.get("total_epochs", 3),
+        "loss": round(s["loss"], 4) if s.get("loss") else None,
+        "error": s.get("error"),
     }
-    if s.started_at:
-        elapsed = (s.finished_at or time.time()) - s.started_at
-        result["elapsed_seconds"] = round(elapsed, 1)
+    started_at = s.get("started_at")
+    if started_at:
+        finished_at = s.get("finished_at") or (time.time() if s.get("running") else started_at)
+        result["elapsed_seconds"] = round(finished_at - started_at, 1)
     return result
 
 
