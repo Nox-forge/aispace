@@ -335,7 +335,7 @@ class FineTuner:
                 max_length=256,
                 dataset_text_field="text",
                 report_to="none",
-                optim="adamw_bnb_8bit",
+                optim="paged_adamw_8bit",
                 gradient_checkpointing=True,
                 gradient_checkpointing_kwargs={"use_reentrant": False},
             )

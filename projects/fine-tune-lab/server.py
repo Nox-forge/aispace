@@ -132,7 +132,7 @@ async def root():
         available[name] = await ollama_model_exists(model)
     return {
         "service": "Fine-Tune Lab",
-        "version": "2.0.0",
+        "version": app.version,
         "ollama_url": OLLAMA_URL,
         "base_model": BASE_MODEL,
         "models": MODEL_NAMES,
