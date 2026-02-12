@@ -17,7 +17,8 @@ RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git /opt/llama.cp
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Fetch app code fresh from GitHub via git clone (bypasses CDN cache)
+# Fetch app code — ARG busts Docker cache on every build
+ARG CACHEBUST=1
 RUN git clone --depth 1 https://github.com/Nox-forge/aispace.git /tmp/aispace \
     && cp /tmp/aispace/projects/fine-tune-lab/trainer.py /app/ \
     && cp /tmp/aispace/projects/fine-tune-lab/server.py /app/ \
